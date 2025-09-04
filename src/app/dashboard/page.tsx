@@ -1,77 +1,154 @@
+// src/app/dashboard/page.tsx
 import { requireAuth } from '@/lib/auth-utils'
-import LogoutButton from '@/components/auth/LogoutButton'
+import Header from '@/components/layout/Header'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Button } from '@/components/ui/button'
+import { Activity, Wifi, Clock, MapPin, Camera, Fish, TrendingUp } from 'lucide-react'
 
 export default async function DashboardPage() {
   const session = await requireAuth()
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      <nav className="bg-blue-600 text-white p-4">
-        <div className="container mx-auto flex justify-between items-center">
-          <div>
-            <h1 className="text-2xl font-bold">Carter Island AUV</h1>
-            <p className="text-blue-100">Dashboard v{process.env.APP_VERSION}</p>
-          </div>
-          <div className="flex items-center space-x-4">
-            <span>Welcome, {session.user.fullName}</span>
-            <span className="bg-blue-500 px-2 py-1 rounded text-xs">
-              {session.user.role}
-            </span>
-            <LogoutButton className="bg-red-500 hover:bg-red-600 px-3 py-1 rounded text-sm transition-colors" />
-          </div>
+    <>
+      <Header 
+        title="Dashboard" 
+        subtitle={`Welcome back, ${session.user.fullName}`}
+      />
+      
+      <main className="p-6 lg:p-8">
+        {/* Stats Cards */}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+          <Card className="border-0 shadow-sm">
+            <CardContent className="p-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-medium text-gray-600">AUV Status</p>
+                  <p className="text-2xl font-semibold text-gray-900">Online</p>
+                </div>
+                <div className="w-12 h-12 bg-green-100 rounded-xl flex items-center justify-center">
+                  <Activity className="w-6 h-6 text-green-600" />
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className="border-0 shadow-sm">
+            <CardContent className="p-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-medium text-gray-600">Connection</p>
+                  <p className="text-2xl font-semibold text-gray-900">Strong</p>
+                </div>
+                <div className="w-12 h-12 bg-blue-100 rounded-xl flex items-center justify-center">
+                  <Wifi className="w-6 h-6 text-blue-600" />
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className="border-0 shadow-sm">
+            <CardContent className="p-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-medium text-gray-600">Uptime</p>
+                  <p className="text-2xl font-semibold text-gray-900">2h 15m</p>
+                </div>
+                <div className="w-12 h-12 bg-amber-100 rounded-xl flex items-center justify-center">
+                  <Clock className="w-6 h-6 text-amber-600" />
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className="border-0 shadow-sm">
+            <CardContent className="p-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-medium text-gray-600">Location</p>
+                  <p className="text-2xl font-semibold text-gray-900">Active</p>
+                </div>
+                <div className="w-12 h-12 bg-purple-100 rounded-xl flex items-center justify-center">
+                  <MapPin className="w-6 h-6 text-purple-600" />
+                </div>
+              </div>
+            </CardContent>
+          </Card>
         </div>
-      </nav>
 
-      <main className="container mx-auto py-8 px-4">
-        <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
-          <div className="bg-white p-6 rounded-lg shadow">
-            <h2 className="text-xl font-semibold mb-4">User Profile</h2>
-            <div className="space-y-2">
-              <p><strong>Name:</strong> {session.user.fullName}</p>
-              <p><strong>Email:</strong> {session.user.email}</p>
-              <p><strong>Phone:</strong> {session.user.phoneNumber}</p>
-              <p><strong>Role:</strong> {session.user.role}</p>
-            </div>
-          </div>
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          {/* Quick Actions */}
+          <Card className="lg:col-span-2 border-0 shadow-sm">
+            <CardHeader className="pb-4">
+              <CardTitle className="flex items-center gap-2 text-lg">
+                <Fish className="h-5 w-5 text-blue-600" />
+                Quick Actions
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                <Button className="h-16 flex-col gap-2" variant="default">
+                  <Activity size={20} />
+                  <span className="text-sm">Start Mission</span>
+                </Button>
+                <Button variant="outline" className="h-16 flex-col gap-2">
+                  <Camera size={20} />
+                  <span className="text-sm">Live Stream</span>
+                </Button>
+                <Button variant="outline" className="h-16 flex-col gap-2">
+                  <Clock size={20} />
+                  <span className="text-sm">View Logs</span>
+                </Button>
+                <Button variant="outline" className="h-16 flex-col gap-2">
+                  <MapPin size={20} />
+                  <span className="text-sm">Navigation</span>
+                </Button>
+                {session.user.role === 'ADMIN' && (
+                  <>
+                    <Button variant="outline" className="h-16 flex-col gap-2 border-red-200 text-red-600 hover:bg-red-50">
+                      <TrendingUp size={20} />
+                      <span className="text-sm">System</span>
+                    </Button>
+                    <Button variant="outline" className="h-16 flex-col gap-2">
+                      <Activity size={20} />
+                      <span className="text-sm">Settings</span>
+                    </Button>
+                  </>
+                )}
+              </div>
+            </CardContent>
+          </Card>
 
-          <div className="bg-white p-6 rounded-lg shadow">
-            <h2 className="text-xl font-semibold mb-4">AUV Status</h2>
-            <div className="text-green-600">
-              <p>● Online</p>
-              <p className="text-sm text-gray-600 mt-2">
-                Last updated: {new Date().toLocaleString('en-US')}
-              </p>
-            </div>
-          </div>
-
-          <div className="bg-white p-6 rounded-lg shadow">
-            <h2 className="text-xl font-semibold mb-4">Quick Actions</h2>
-            <div className="space-y-2">
-              <button className="w-full bg-blue-600 text-white py-2 px-4 rounded hover:bg-blue-700 transition-colors">
-                Start Mission
-              </button>
-              <button className="w-full bg-gray-600 text-white py-2 px-4 rounded hover:bg-gray-700 transition-colors">
-                View Logs
-              </button>
-            </div>
-          </div>
+          {/* User Profile */}
+          <Card className="border-0 shadow-sm">
+            <CardHeader className="pb-4">
+              <CardTitle className="text-lg">Profile</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-4">
+                <div className="flex items-center space-x-3">
+                  <div className="w-12 h-12 rounded-full bg-gradient-to-br from-blue-500 to-blue-600 flex items-center justify-center text-white font-medium">
+                    {session.user.fullName.split(' ').map(n => n[0]).join('').slice(0, 2)}
+                  </div>
+                  <div>
+                    <h4 className="font-medium text-gray-900">{session.user.fullName}</h4>
+                    <p className="text-sm text-gray-500">{session.user.role}</p>
+                  </div>
+                </div>
+                <div className="space-y-2 text-sm text-gray-600">
+                  <div className="flex justify-between">
+                    <span>Email</span>
+                    <span className="font-medium text-gray-900 truncate ml-2">{session.user.email}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>Phone</span>
+                    <span className="font-medium text-gray-900">{session.user.phoneNumber}</span>
+                  </div>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
         </div>
-
-        {session.user.role === 'ADMIN' && (
-          <div className="mt-8 bg-yellow-50 border border-yellow-200 p-6 rounded-lg">
-            <h2 className="text-xl font-semibold mb-4 text-yellow-800">Admin Panel</h2>
-            <p className="text-yellow-700">You have admin access to manage the system.</p>
-            <div className="mt-4 space-x-4">
-              <button className="bg-yellow-600 text-white py-2 px-4 rounded hover:bg-yellow-700 transition-colors">
-                Manage Users
-              </button>
-              <button className="bg-yellow-600 text-white py-2 px-4 rounded hover:bg-yellow-700 transition-colors">
-                System Settings
-              </button>
-            </div>
-          </div>
-        )}
       </main>
-    </div>
+    </>
   )
 }
