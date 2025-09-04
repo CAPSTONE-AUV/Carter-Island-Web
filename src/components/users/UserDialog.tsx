@@ -1,0 +1,234 @@
+// src/components/users/UserDialog.tsx
+'use client'
+
+import { useState } from 'react'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { Badge } from '@/components/ui/badge'
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from '@/components/ui/dialog'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
+import { toast } from 'sonner'
+
+interface User {
+  id: string
+  fullName: string
+  email: string
+  phoneNumber: string
+  role: 'USER' | 'ADMIN'
+  createdAt: string
+  updatedAt: string
+}
+
+interface UserDialogProps {
+  isOpen: boolean
+  onClose: () => void
+  onSuccess: () => void
+  user?: User | null
+  mode: 'create' | 'edit' | 'view'
+}
+
+export default function UserDialog({ 
+  isOpen, 
+  onClose, 
+  onSuccess, 
+  user, 
+  mode 
+}: UserDialogProps) {
+  const [isLoading, setIsLoading] = useState(false)
+  const [formData, setFormData] = useState({
+    fullName: user?.fullName || '',
+    email: user?.email || '',
+    password: '',
+    phoneNumber: user?.phoneNumber || '',
+    role: user?.role || 'USER'
+  })
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setIsLoading(true)
+
+    try {
+      const url = mode === 'create' ? '/api/users' : `/api/users/${user?.id}`
+      const method = mode === 'create' ? 'POST' : 'PUT'
+      
+      const response = await fetch(url, {
+        method,
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(formData),
+      })
+
+      const data = await response.json()
+
+      if (!response.ok) {
+        throw new Error(data.error || 'Something went wrong')
+      }
+
+      toast.success(data.message)
+      onSuccess()
+      onClose()
+    } catch (error: any) {
+      toast.error(error.message)
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  const handleInputChange = (field: string, value: string) => {
+    setFormData(prev => ({
+      ...prev,
+      [field]: value
+    }))
+  }
+
+  const getTitle = () => {
+    switch (mode) {
+      case 'create': return 'Add New User'
+      case 'edit': return 'Edit User'
+      case 'view': return 'User Details'
+      default: return 'User'
+    }
+  }
+
+  return (
+    <Dialog open={isOpen} onOpenChange={onClose}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>{getTitle()}</DialogTitle>
+        </DialogHeader>
+
+        {mode === 'view' ? (
+          // View Mode
+          <div className="space-y-4">
+            <div>
+              <Label className="text-sm font-medium text-gray-600">Full Name</Label>
+              <p className="mt-1 text-sm text-gray-900">{user?.fullName}</p>
+            </div>
+            <div>
+              <Label className="text-sm font-medium text-gray-600">Email</Label>
+              <p className="mt-1 text-sm text-gray-900">{user?.email}</p>
+            </div>
+            <div>
+              <Label className="text-sm font-medium text-gray-600">Phone Number</Label>
+              <p className="mt-1 text-sm text-gray-900">{user?.phoneNumber}</p>
+            </div>
+            <div>
+              <Label className="text-sm font-medium text-gray-600">Role</Label>
+              <div className="mt-1">
+                <Badge variant={user?.role === 'ADMIN' ? 'default' : 'secondary'}>
+                  {user?.role}
+                </Badge>
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <Label className="text-sm font-medium text-gray-600">Created</Label>
+                <p className="mt-1 text-xs text-gray-500">{user?.createdAt}</p>
+              </div>
+              <div>
+                <Label className="text-sm font-medium text-gray-600">Updated</Label>
+                <p className="mt-1 text-xs text-gray-500">{user?.updatedAt}</p>
+              </div>
+            </div>
+          </div>
+        ) : (
+          // Create/Edit Mode
+          <form onSubmit={handleSubmit} className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="fullName">Full Name *</Label>
+              <Input
+                id="fullName"
+                value={formData.fullName}
+                onChange={(e) => handleInputChange('fullName', e.target.value)}
+                placeholder="Enter full name"
+                required
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="email">Email *</Label>
+              <Input
+                id="email"
+                type="email"
+                value={formData.email}
+                onChange={(e) => handleInputChange('email', e.target.value)}
+                placeholder="Enter email address"
+                required
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="password">
+                Password {mode === 'create' ? '*' : '(leave blank to keep current)'}
+              </Label>
+              <Input
+                id="password"
+                type="password"
+                value={formData.password}
+                onChange={(e) => handleInputChange('password', e.target.value)}
+                placeholder={mode === 'create' ? 'Enter password' : 'Enter new password'}
+                required={mode === 'create'}
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="phoneNumber">Phone Number *</Label>
+              <Input
+                id="phoneNumber"
+                value={formData.phoneNumber}
+                onChange={(e) => handleInputChange('phoneNumber', e.target.value)}
+                placeholder="Enter phone number"
+                required
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="role">Role *</Label>
+              <Select 
+                value={formData.role} 
+                onValueChange={(value) => handleInputChange('role', value)}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Select role" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="USER">User</SelectItem>
+                  <SelectItem value="ADMIN">Admin</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={onClose}>
+                Cancel
+              </Button>
+              <Button type="submit" disabled={isLoading}>
+                {isLoading ? 'Saving...' : mode === 'create' ? 'Create User' : 'Update User'}
+              </Button>
+            </DialogFooter>
+          </form>
+        )}
+
+        {mode === 'view' && (
+          <DialogFooter>
+            <Button onClick={onClose}>Close</Button>
+          </DialogFooter>
+        )}
+      </DialogContent>
+    </Dialog>
+  )
+}

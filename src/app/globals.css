@@ -120,3 +120,35 @@
     @apply bg-background text-foreground;
   }
 }
+
+
+/* Dashboard */
+.dashboard-content {
+  margin-left: 0;
+  transition: margin-left 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+  min-height: 100vh;
+  transform: translateZ(0);
+}
+
+@media (min-width: 1024px) {
+  .dashboard-content {
+    margin-left: 18rem;
+  }
+  
+  /* Ketika sidebar collapsed */
+  .sidebar-collapsed .dashboard-content {
+    margin-left: 4rem;
+  }
+}
+
+/* Smooth scrolling untuk navigation */
+html {
+  scroll-behavior: smooth;
+}
+
+/* Additional responsive improvements */
+@media (max-width: 1023px) {
+  .dashboard-content {
+    margin-left: 0;
+  }
+}

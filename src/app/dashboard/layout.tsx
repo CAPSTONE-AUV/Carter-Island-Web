@@ -12,8 +12,10 @@ export default async function DashboardLayout({
   return (
     <div className="min-h-screen bg-gray-50">
       <Sidebar session={session} />
-      <div className="lg:ml-72 transition-all duration-300">
-        {children}
+      <div className="dashboard-content">
+        <main className="p-4 lg:p-6">
+          {children}
+        </main>
       </div>
     </div>
   )
