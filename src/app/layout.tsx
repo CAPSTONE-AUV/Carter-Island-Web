@@ -1,4 +1,6 @@
+// src/app/layout.tsx
 import SessionProvider from '@/components/providers/SessionProvider'
+import { Toaster } from '@/components/ui/sonner'
 import './globals.css'
 
 export const metadata = {
@@ -17,6 +19,7 @@ export default function RootLayout({
         <SessionProvider>
           {children}
         </SessionProvider>
+        <Toaster position="top-right" />
       </body>
     </html>
   )
