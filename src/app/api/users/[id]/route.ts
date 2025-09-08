@@ -6,7 +6,7 @@ import { prisma } from '@/lib/prisma'
 import { authOptions } from '@/lib/auth'
 import { TimezoneUtil } from '@/lib/timezone'
 
-// GET - Get single user by ID
+// GET - Get single user (Admin only)
 export async function GET(
   request: NextRequest,
   { params }: { params: { id: string } }
@@ -41,12 +41,13 @@ export async function GET(
       )
     }
 
-    return NextResponse.json({
+    const formattedUser = {
       ...user,
       createdAt: TimezoneUtil.formatIndonesian(user.createdAt),
       updatedAt: TimezoneUtil.formatIndonesian(user.updatedAt)
-    })
+    }
 
+    return NextResponse.json(formattedUser)
   } catch (error) {
     console.error(`[${TimezoneUtil.getTimestamp()}] Get user error:`, error)
     return NextResponse.json(
@@ -56,7 +57,7 @@ export async function GET(
   }
 }
 
-// PUT - Update user
+// PUT - Update user (Admin only)
 export async function PUT(
   request: NextRequest,
   { params }: { params: { id: string } }
@@ -74,6 +75,14 @@ export async function PUT(
     const body = await request.json()
     const { fullName, email, password, phoneNumber, role } = body
 
+    // Validate required fields
+    if (!fullName || !email || !phoneNumber) {
+      return NextResponse.json(
+        { error: 'Full name, email, and phone number are required' },
+        { status: 400 }
+      )
+    }
+
     // Check if user exists
     const existingUser = await prisma.user.findUnique({
       where: { id: params.id }
@@ -86,36 +95,16 @@ export async function PUT(
       )
     }
 
-    // Validate required fields
-    if (!fullName || !email || !phoneNumber) {
-      return NextResponse.json(
-        { error: 'Full name, email, and phone number are required' },
-        { status: 400 }
-      )
-    }
-
-    // Validate email format
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
-    if (!emailRegex.test(email)) {
-      return NextResponse.json(
-        { error: 'Invalid email format' },
-        { status: 400 }
-      )
-    }
-
-    // Check if email is taken by another user
+    // Check if email is already taken by another user
     if (email !== existingUser.email) {
-      const emailTaken = await prisma.user.findFirst({
-        where: { 
-          email,
-          id: { not: params.id }
-        }
+      const emailExists = await prisma.user.findUnique({
+        where: { email }
       })
 
-      if (emailTaken) {
+      if (emailExists) {
         return NextResponse.json(
-          { error: 'Email already registered' },
-          { status: 409 }
+          { error: 'Email is already registered' },
+          { status: 400 }
         )
       }
     }
@@ -125,19 +114,13 @@ export async function PUT(
       fullName,
       email,
       phoneNumber,
-      role: role as 'USER' | 'ADMIN',
-      updatedAt: TimezoneUtil.now()
+      role: role || 'USER'
     }
 
-    // Hash new password if provided
+    // Hash password if provided
     if (password && password.trim() !== '') {
-      if (password.length < 6) {
-        return NextResponse.json(
-          { error: 'Password must be at least 6 characters long' },
-          { status: 400 }
-        )
-      }
-      updateData.password = await bcrypt.hash(password, 12)
+      const hashedPassword = await bcrypt.hash(password, 12)
+      updateData.password = hashedPassword
     }
 
     // Update user
@@ -150,18 +133,16 @@ export async function PUT(
         email: true,
         phoneNumber: true,
         role: true,
-        createdAt: true,
         updatedAt: true
       }
     })
 
-    console.log(`[${TimezoneUtil.getTimestamp()}] User updated by admin: ${updatedUser.email}`)
+    console.log(`[${TimezoneUtil.getTimestamp()}] User updated: ${updatedUser.id} by admin: ${session.user.id}`)
 
     return NextResponse.json({
       message: 'User updated successfully',
       user: {
         ...updatedUser,
-        createdAt: TimezoneUtil.formatIndonesian(updatedUser.createdAt),
         updatedAt: TimezoneUtil.formatIndonesian(updatedUser.updatedAt)
       }
     })
@@ -175,7 +156,7 @@ export async function PUT(
   }
 }
 
-// DELETE - Delete user
+// DELETE - Delete user (Admin only)
 export async function DELETE(
   request: NextRequest,
   { params }: { params: { id: string } }
@@ -190,17 +171,18 @@ export async function DELETE(
       )
     }
 
-    // Prevent admin from deleting themselves
-    if (session.user.id === params.id) {
+    // Prevent self-deletion
+    if (params.id === session.user.id) {
       return NextResponse.json(
-        { error: 'Cannot delete your own account' },
+        { error: 'You cannot delete your own account' },
         { status: 400 }
       )
     }
 
     // Check if user exists
     const user = await prisma.user.findUnique({
-      where: { id: params.id }
+      where: { id: params.id },
+      select: { id: true, fullName: true, email: true }
     })
 
     if (!user) {
@@ -215,10 +197,10 @@ export async function DELETE(
       where: { id: params.id }
     })
 
-    console.log(`[${TimezoneUtil.getTimestamp()}] User deleted by admin: ${user.email}`)
+    console.log(`[${TimezoneUtil.getTimestamp()}] User deleted: ${user.id} (${user.email}) by admin: ${session.user.id}`)
 
     return NextResponse.json({
-      message: 'User deleted successfully'
+      message: `User "${user.fullName}" has been deleted successfully`
     })
 
   } catch (error) {
