@@ -248,6 +248,172 @@
             ${isMobileOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}
         `}>
 
+          {/* User Profile Header */}
+          <div className="px-3 py-4 border-b border-gray-100">
+          <div className="flex items-center justify-between">
+              {/* Profile Content - Clickable when collapsed */}
+              <div 
+              className={`
+                  flex items-center space-x-3 flex-1 min-w-0
+                  ${isCollapsed ? 'cursor-pointer transition-colors duration-200' : ''}
+              `}
+              onClick={isCollapsed ? () => setIsCollapsed(false) : undefined}
+              title={isCollapsed ? "Expand sidebar" : undefined}
+              >
+
+              <div className={`
+                  rounded-full bg-gradient-to-br from-blue-500 to-blue-600 
+                  flex items-center justify-center text-white font-medium shadow-lg
+                  transition-all duration-300 ease-out flex-shrink-0
+                  ${isCollapsed ? 'w-10 h-10 text-xs hover:scale-105' : 'w-12 h-12 text-sm'}
+              `}>
+                  {session.user.fullName.split(' ').map(n => n[0]).join('').slice(0, 2)}
+              </div>
+              
+              {/* User Info */}
+              <div className={`
+                  flex-1 min-w-0 overflow-hidden
+                  transition-all duration-300 ease-out
+                  ${isCollapsed 
+                  ? 'opacity-0 -translate-x-4 w-0' 
+                  : 'opacity-100 translate-x-0 w-auto'
+                  }
+              `}>
+                  <p className="text-sm font-semibold text-gray-900 truncate">
+                  {session.user.fullName}
+                  </p>
+                  <p className="text-xs text-gray-500 truncate">
+                  {session.user.email}
+                  </p>
+                  <Badge 
+                  variant={session.user.role === 'ADMIN' ? "default" : "secondary"} 
+                  className="text-xs mt-1"
+                  >
+                  {session.user.role}
+                  </Badge>
+              </div>
+              </div>
+              
+              {/* Collapse button */}
+              {!isCollapsed && (
+              <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => setIsCollapsed(true)}
+                  className="hidden lg:flex h-8 w-8 hover:bg-gray-100 flex-shrink-0 ml-2"
+                  title="Collapse sidebar"
+              >
+                  <ChevronLeft className="h-4 w-4" />
+              </Button>
+              )}
+          </div>
+
+          {/* Close button for mobile */}
+          <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => setIsMobileOpen(false)}
+              className="lg:hidden absolute top-4 right-4 h-8 w-8 z-10"
+          >
+              <X className="h-4 w-4" />
+          </Button>
+          </div>
+
+          <div className="p-4 border-b border-gray-100">
+            {!isCollapsed ? (
+              <div className="flex items-center justify-between">
+                <div className="flex items-center space-x-3 min-w-0">
+                  <div
+                    className={`
+                      flex items-center justify-center text-white font-medium shadow-lg
+                      rounded-full bg-gradient-to-br from-blue-500 to-blue-600
+                      transition-all duration-500 ease-in-out
+                      ${isCollapsed ? 'w-10 h-10 text-xs' : 'w-12 h-12 text-sm'}
+                    `}
+                  >
+                    {session.user.fullName.split(' ').map(n => n[0]).join('').slice(0, 2)}
+                  </div>
+
+                  {/* Info user */}
+                  <div
+                    className={`
+                      flex-1 overflow-hidden
+                      transition-all duration-500 ease-in-out
+                      ${isCollapsed ? 'max-w-0 opacity-0 translate-x-3' : 'max-w-[220px] opacity-100 translate-x-0'}
+                    `}
+                    style={{ transitionProperty: 'max-width, opacity, transform' }}
+                  >
+                    <p className="text-sm font-semibold text-gray-900 truncate">
+                      {session.user.fullName}
+                    </p>
+                    <p className="text-xs text-gray-500 truncate">
+                      {session.user.email}
+                    </p>
+                    <Badge
+                      variant={session.user.role === 'ADMIN' ? 'default' : 'secondary'}
+                      className="text-xs mt-1"
+                    >
+                      {session.user.role}
+                    </Badge>
+                  </div>
+                </div>
+
+                {/* Collapse button */}
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => setIsCollapsed(!isCollapsed)}
+                  className="hidden lg:flex h-8 w-8 hover:bg-gray-100 flex-shrink-0"
+                >
+                  <ChevronLeft
+                    className={`
+                      h-4 w-4 transition-transform duration-500 ease-in-out
+                      ${isCollapsed ? 'rotate-180' : ''}
+                    `}
+                  />
+                </Button>
+              </div>
+            ) : (
+              <div className="flex flex-col items-center">
+                <div
+                  className={`
+                    flex items-center justify-center text-white font-medium shadow-lg
+                    rounded-full bg-gradient-to-br from-blue-500 to-blue-600 mb-2
+                    transition-all duration-500 ease-in-out
+                    ${isCollapsed ? 'w-10 h-10 text-xs' : 'w-12 h-12 text-sm'}
+                  `}
+                >
+                  {session.user.fullName.split(' ').map(n => n[0]).join('').slice(0, 2)}
+                </div>
+
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => setIsCollapsed(!isCollapsed)}
+                  className="hidden lg:flex h-8 w-8 hover:bg-gray-100"
+                  title="Expand sidebar"
+                >
+                  <ChevronLeft
+                    className={`
+                      h-4 w-4 transition-transform duration-500 ease-in-out
+                      ${isCollapsed ? 'rotate-180' : ''}
+                    `}
+                  />
+                </Button>
+              </div>
+            )}
+
+            {/* Close button for mobile */}
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => setIsMobileOpen(false)}
+              className="lg:hidden absolute top-4 right-4 h-8 w-8"
+            >
+              <X className="h-4 w-4" />
+            </Button>
+          </div>
+
             {/* Navigation */}
             <nav className="flex-1 overflow-y-auto py-4">
             <MenuSection title="MENU" items={filteredMainItems} />
