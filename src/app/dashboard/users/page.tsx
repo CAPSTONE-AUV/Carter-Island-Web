@@ -67,6 +67,19 @@ export default function UsersPage() {
     return Math.max(1, Math.ceil(total / limit))
   }, [total, limit])
 
+  const visiblePages = useMemo(() => {
+    const pages: number[] = []
+    const delta = 1 // tampilkan 1 kiri/kanan dari current
+    const start = Math.max(1, page - delta)
+    const end = Math.min(pageCount, page + delta)
+
+    for (let p = start; p <= end; p++) {
+      pages.push(p)
+    }
+    
+    return pages
+  }, [page, pageCount])
+
   const [dialogState, setDialogState] = useState<{
     isOpen: boolean
     mode: 'create' | 'edit' | 'view'
@@ -126,8 +139,8 @@ export default function UsersPage() {
     const end = start + currentLimit
     setUsers(all.slice(start, end)) // <- potong sesuai page & limit
     setTotal(all.length)
-  } catch (e) {
-    console.error('Error fetching users:', e)
+  } catch (error) {
+    console.error('Error fetching users:', error)
     toast.error('Failed to load users')
   } finally {
     setLoading(false)
@@ -198,9 +211,10 @@ export default function UsersPage() {
 
       await fetchUsers({ page: nextPage })
       setDeleteDialog({ isOpen: false, user: null, isDeleting: false })
-    } catch (error: any) {
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : 'Failed to delete user'
       console.error('Error deleting user:', error)
-      toast.error(error.message || 'Failed to delete user')
+      toast.error(errorMessage)
       setDeleteDialog((prev) => ({ ...prev, isDeleting: false }))
     }
   }
@@ -231,17 +245,6 @@ export default function UsersPage() {
   if (session.user.role !== 'ADMIN') {
     return null
   }
-
-  // Helpers for Pagination numbers (menampilkan sekitar current page)
-  const visiblePages = useMemo(() => {
-    const pages: number[] = []
-    const delta = 1 // tampilkan 1 kiri/kanan dari current
-    const start = Math.max(1, page - delta)
-    const end = Math.min(pageCount, page + delta)
-
-    for (let p = start; p <= end; p++) pages.push(p)
-    return pages
-  }, [page, pageCount])
 
   return (
     <>

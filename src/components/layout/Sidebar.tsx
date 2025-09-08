@@ -132,6 +132,7 @@
         return pathname.startsWith(href)
     }
 
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const MenuSection = ({ title, items }: { title?: string, items: any[] }) => (
         <div className="space-y-1">
         {title && !isCollapsed && (

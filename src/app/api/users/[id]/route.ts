@@ -1,4 +1,5 @@
 // src/app/api/users/[id]/route.ts
+import { Role } from '@prisma/client'
 import { NextRequest, NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import bcrypt from 'bcryptjs'
@@ -112,11 +113,17 @@ export async function PUT(
     }
 
     // Prepare update data
-    const updateData: any = {
+    const updateData: {
+      fullName: string
+      email: string
+      phoneNumber: string
+      role: Role
+      password?: string
+    } = {
       fullName,
       email,
       phoneNumber,
-      role: role || 'USER'
+      role: (role as Role) || Role.USER
     }
 
     // Hash password if provided

@@ -4,11 +4,11 @@ import moment from 'moment-timezone'
 const INDONESIA_TIMEZONE = 'Asia/Jakarta'
 
 export class TimezoneUtil {
-  static getRelativeTime(updatedAt: any): import("react").ReactNode {
-      throw new Error('Method not implemented.')
+  static getRelativeTime(updatedAt: Date | string): string {
+    return moment(updatedAt).tz(INDONESIA_TIMEZONE).fromNow()
   }
-  static formatForDisplay(createdAt: any): import("react").ReactNode {
-      throw new Error('Method not implemented.')
+  static formatForDisplay(createdAt: Date | string): string {
+    return moment(createdAt).tz(INDONESIA_TIMEZONE).format('DD MMM YYYY, HH:mm')
   }
   // Get current time in Indonesia timezone
   static now(): Date {

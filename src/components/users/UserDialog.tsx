@@ -139,8 +139,9 @@ export default function UserDialog({
         phoneNumber: '',
         role: 'USER'
       })
-    } catch (error: any) {
-      toast.error(error.message)
+    } catch (error: unknown) {  
+      const errorMessage = error instanceof Error ? error.message : 'Failed to save user'
+      toast.error(errorMessage)
     } finally {
       setIsLoading(false)
     }

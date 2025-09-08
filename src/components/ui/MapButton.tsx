@@ -2,7 +2,6 @@
 'use client'
 
 import { Button } from '@/components/ui/button'
-import { MapPin } from 'lucide-react'
 
 interface MapButtonProps {
   lat: number

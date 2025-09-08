@@ -4,6 +4,14 @@ import bcrypt from 'bcryptjs'
 import { prisma } from './prisma'
 import { TimezoneUtil } from './timezone'
 
+interface AuthUser {
+  id: string
+  fullName: string
+  email: string
+  phoneNumber: string
+  role: 'USER' | 'ADMIN'
+}
+
 export const authOptions: NextAuthOptions = {
   providers: [
     CredentialsProvider({
@@ -69,11 +77,12 @@ export const authOptions: NextAuthOptions = {
   callbacks: {
     async jwt({ token, user }) {
       if (user) {
-        token.id = user.id
-        token.fullName = (user as any).fullName
-        token.email = user.email
-        token.phoneNumber = (user as any).phoneNumber
-        token.role = (user as any).role
+        const authUser = user as AuthUser
+        token.id = authUser.id
+        token.fullName = authUser.fullName      
+        token.email = authUser.email
+        token.phoneNumber = authUser.phoneNumber
+        token.role = authUser.role 
       }
       return token
     },

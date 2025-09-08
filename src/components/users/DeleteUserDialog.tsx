@@ -54,8 +54,9 @@ export default function DeleteUserDialog({
       toast.success(data.message)
       onSuccess()
       onClose()
-    } catch (error: any) {
-      toast.error(error.message)
+    } catch (error: unknown) {  
+      const errorMessage = error instanceof Error ? error.message : 'Failed to delete user'
+      toast.error(errorMessage)
     } finally {
       setIsLoading(false)
     }
