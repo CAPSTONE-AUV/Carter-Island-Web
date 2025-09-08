@@ -41,8 +41,9 @@ export default function RegisterForm() {
       } else {
         setError(data.error || 'Registration failed')
       }
-    } catch (error) {
-      setError('An error occurred during registration')
+    } catch (error) {  
+      const errorMessage = error instanceof Error ? error.message : 'An error occurred during registration'
+      setError(errorMessage)
     } finally {
       setLoading(false)
     }

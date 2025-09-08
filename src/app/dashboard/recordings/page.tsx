@@ -15,9 +15,9 @@ export default async function RecordingsPage() {
 
   return (
     <>
-      <Header title="Recordings" subtitle="Manage your AUV video recordings" />
+      <Header title="Recordings" subtitle="Manage AUV Video Recordings" emoji="📹"/>
       
-      <main className="flex-1 overflow-auto p-6">
+      <main className="p-0 lg:px-4 mt-4">
         <Card>
           <CardContent className="p-6">
             <div className="overflow-x-auto">

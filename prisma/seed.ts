@@ -1,4 +1,4 @@
-import { PrismaClient } from '@prisma/client'
+import { PrismaClient, Role } from '@prisma/client'
 import bcrypt from 'bcryptjs'
 import moment from 'moment-timezone'
 
@@ -33,7 +33,7 @@ async function main() {
       fullName: 'Carter Island Administrator',
       password: hashedPassword,
       phoneNumber: '+62-812-3456-7890',
-      role: 'ADMIN',
+      role: Role.ADMIN,
       createdAt: currentTime,
       updatedAt: currentTime,
     },
@@ -50,7 +50,7 @@ async function main() {
       fullName: 'Carter Island User',
       password: hashedPassword,
       phoneNumber: '+62-812-3456-7891',
-      role: 'USER',
+      role: Role.USER,
       createdAt: currentTime,
       updatedAt: currentTime,
     },
@@ -62,19 +62,19 @@ async function main() {
       email: 'john.doe@carterisland.com',
       fullName: 'John Doe',
       phoneNumber: '+62-812-1111-1111',
-      role: 'USER',
+      role: Role.USER,
     },
     {
       email: 'jane.smith@carterisland.com', 
       fullName: 'Jane Smith',
       phoneNumber: '+62-812-2222-2222',
-      role: 'USER',
+      role: Role.USER,
     },
     {
       email: 'supervisor@carterisland.com',
       fullName: 'AUV Supervisor',
       phoneNumber: '+62-812-9999-9999',
-      role: 'ADMIN',
+      role: Role.ADMIN,
     }
   ]
 

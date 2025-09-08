@@ -139,8 +139,9 @@ export default function UserDialog({
         phoneNumber: '',
         role: 'USER'
       })
-    } catch (error: any) {
-      toast.error(error.message)
+    } catch (error: unknown) {  
+      const errorMessage = error instanceof Error ? error.message : 'Failed to save user'
+      toast.error(errorMessage)
     } finally {
       setIsLoading(false)
     }
@@ -290,7 +291,7 @@ export default function UserDialog({
               <Button type="button" variant="outline" onClick={handleClose} disabled={isLoading}>
                 Cancel
               </Button>
-              <Button type="submit" disabled={isLoading}>
+              <Button type="submit" disabled={isLoading} className="bg-green-600 hover:bg-green-700 text-white" >
                 {isLoading ? (
                   <>
                     <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin mr-2" />
@@ -306,7 +307,7 @@ export default function UserDialog({
 
         {mode === 'view' && (
           <DialogFooter>
-            <Button onClick={handleClose}>Close</Button>
+            <Button onClick={handleClose} className="bg-blue-600 hover:bg-blue-700 text-white">Close</Button>
           </DialogFooter>
         )}
       </DialogContent>

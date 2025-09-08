@@ -1,6 +1,7 @@
 import { getServerSession } from 'next-auth'
 import { authOptions } from './auth'
 import { redirect } from 'next/navigation'
+import { Session } from 'next-auth'
 
 export async function getAuthSession() {
   return await getServerSession(authOptions)
@@ -22,6 +23,6 @@ export async function requireAdmin() {
   return session
 }
 
-export function hasRole(session: any, role: 'USER' | 'ADMIN') {
+export function hasRole(session: Session | null, role: 'USER' | 'ADMIN') {
   return session?.user?.role === role
 }

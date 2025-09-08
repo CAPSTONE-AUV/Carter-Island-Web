@@ -1,6 +1,7 @@
 // src/components/auth/LoginForm.tsx
 'use client'
 
+import Image from 'next/image'
 import { useEffect, useMemo, useState } from 'react'
 import { signIn } from 'next-auth/react'
 import { useRouter } from 'next/navigation'
@@ -27,7 +28,7 @@ export default function LoginForm() {
   const [exiting, setExiting] = useState(false)
 
   useEffect(() => {
-    const img = new Image()
+    const img = new window.Image()
     img.src = heroImageUrl
     if (img.complete) {
       setReady(true)
@@ -216,7 +217,7 @@ export default function LoginForm() {
 
             {/* RIGHT IMAGE */}
             <div className="relative hidden md:block h-full overflow-hidden">
-              <img src={heroImageUrl} alt="Carter Island AUV" className="absolute inset-0 h-full w-full object-cover" />
+              <Image src={heroImageUrl} alt="Carter Island AUV" fill className="object-cover" priority sizes="(max-width: 768px) 0vw, 50vw"/>
               <div className="pointer-events-none absolute inset-0 bg-gradient-to-br from-blue-600/10 to-indigo-600/20" />
             </div>
           </div>

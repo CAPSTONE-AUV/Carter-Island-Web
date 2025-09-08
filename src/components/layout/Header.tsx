@@ -5,10 +5,11 @@ import { Anchor } from 'lucide-react'
 interface HeaderProps {
   title: string
   subtitle?: string
+  emoji?: string 
   children?: ReactNode
 }
 
-const Header = ({ title, subtitle, children }: HeaderProps) => {
+const Header = ({ title, subtitle,  emoji = "👋", children }: HeaderProps) => {
   // Function untuk mendapatkan tanggal hari ini dalam format yang sesuai
   const getCurrentDate = () => {
     const today = new Date()
@@ -30,7 +31,7 @@ const Header = ({ title, subtitle, children }: HeaderProps) => {
             <div className="mb-2">
               <h1 className="text-2xl font-bold text-gray-900 flex items-center">
                 {subtitle} 
-                <span className="text-2xl">👋</span>
+                <span className="text-2xl">{emoji}</span>
               </h1>
               <p className="text-gray-500 text-sm mt-1">
                 {getCurrentDate()}

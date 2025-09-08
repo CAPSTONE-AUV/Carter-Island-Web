@@ -67,6 +67,19 @@ export default function UsersPage() {
     return Math.max(1, Math.ceil(total / limit))
   }, [total, limit])
 
+  const visiblePages = useMemo(() => {
+    const pages: number[] = []
+    const delta = 1 // tampilkan 1 kiri/kanan dari current
+    const start = Math.max(1, page - delta)
+    const end = Math.min(pageCount, page + delta)
+
+    for (let p = start; p <= end; p++) {
+      pages.push(p)
+    }
+    
+    return pages
+  }, [page, pageCount])
+
   const [dialogState, setDialogState] = useState<{
     isOpen: boolean
     mode: 'create' | 'edit' | 'view'
@@ -126,8 +139,8 @@ export default function UsersPage() {
     const end = start + currentLimit
     setUsers(all.slice(start, end)) // <- potong sesuai page & limit
     setTotal(all.length)
-  } catch (e) {
-    console.error('Error fetching users:', e)
+  } catch (error) {
+    console.error('Error fetching users:', error)
     toast.error('Failed to load users')
   } finally {
     setLoading(false)
@@ -198,20 +211,35 @@ export default function UsersPage() {
 
       await fetchUsers({ page: nextPage })
       setDeleteDialog({ isOpen: false, user: null, isDeleting: false })
-    } catch (error: any) {
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : 'Failed to delete user'
       console.error('Error deleting user:', error)
-      toast.error(error.message || 'Failed to delete user')
+      toast.error(errorMessage)
       setDeleteDialog((prev) => ({ ...prev, isDeleting: false }))
     }
   }
 
   const closeDialog = () => {
-    setDialogState({
+    setDialogState(prev => ({
+      ...prev,
       isOpen: false,
-      mode: 'create',
-      user: null,
-    })
+    }))
   }
+
+  // Tambahkan useEffect untuk reset setelah dialog tertutup
+  useEffect(() => {
+    if (!dialogState.isOpen) {
+      const timer = setTimeout(() => {
+        setDialogState(prev => ({
+          ...prev,
+          mode: 'create',
+          user: null,
+        }))
+      }, 300)
+      
+      return () => clearTimeout(timer)
+    }
+  }, [dialogState.isOpen])
 
   const handleDialogSuccess = () => {
     // setelah create/edit, refresh data (tetap di page sekarang)
@@ -232,29 +260,18 @@ export default function UsersPage() {
     return null
   }
 
-  // Helpers for Pagination numbers (menampilkan sekitar current page)
-  const visiblePages = useMemo(() => {
-    const pages: number[] = []
-    const delta = 1 // tampilkan 1 kiri/kanan dari current
-    const start = Math.max(1, page - delta)
-    const end = Math.min(pageCount, page + delta)
-
-    for (let p = start; p <= end; p++) pages.push(p)
-    return pages
-  }, [page, pageCount])
-
   return (
     <>
-      <Header title="User Management" subtitle="Manage system users and permissions">
-        <Button onClick={handleAddUser} className="flex items-center gap-2">
+      <Header title="User Management" subtitle="Manage System Users and Permissions" emoji="🔧">
+        <Button onClick={handleAddUser} className="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white">
           <Plus className="h-4 w-4" />
           Add New User
         </Button>
       </Header>
 
-      <main className="flex-1 overflow-auto p-6">
+      <main className="p-0 lg:px-4 mt-4">
         <Card>
-          <CardContent className="p-6">
+          <CardContent className="px-4">
             {/* Toolbar atas: page size & info */}
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
               <div className="text-sm text-muted-foreground">
@@ -402,10 +419,6 @@ export default function UsersPage() {
 
                 {/* Pagination */}
                 <div className="mt-4 flex items-center justify-between">
-                  <div className="text-sm text-muted-foreground">
-                    Page <span className="font-medium">{page}</span> of{' '}
-                    <span className="font-medium">{pageCount}</span>
-                  </div>
 
                   <Pagination>
                     <PaginationContent>
