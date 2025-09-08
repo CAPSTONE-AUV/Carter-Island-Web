@@ -12,16 +12,17 @@ export default async function StreamPage() {
     <>
       <Header 
         title="Fish Farm Monitoring" 
-        subtitle="Live underwater camera feed from Carter Island AUV"
+        subtitle="Live Underwater Camera Feed"
+        emoji="🌊"
       >
-        <Button className="flex items-center gap-2">
+        <Button className="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white">
           <Camera className="h-4 w-4" />
           Start Stream
         </Button>
       </Header>
       
-      <main className="flex-1 overflow-auto p-6">
-        <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
+      <main className="p-0 lg:px-4 mt-4">
+        <div className="grid grid-cols-1 lg:grid-cols-4 gap-4">
           <Card className="bg-white/80 backdrop-blur-sm">
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
