@@ -1,7 +1,7 @@
 // src/components/users/UserDialog.tsx
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -40,6 +40,22 @@ interface UserDialogProps {
   mode: 'create' | 'edit' | 'view'
 }
 
+interface FormData {
+  fullName: string
+  email: string
+  password: string
+  phoneNumber: string
+  role: 'USER' | 'ADMIN'
+}
+
+interface SubmitData {
+  fullName: string
+  email: string
+  password?: string
+  phoneNumber: string
+  role: 'USER' | 'ADMIN'
+}
+
 export default function UserDialog({ 
   isOpen, 
   onClose, 
@@ -48,13 +64,35 @@ export default function UserDialog({
   mode 
 }: UserDialogProps) {
   const [isLoading, setIsLoading] = useState(false)
-  const [formData, setFormData] = useState({
-    fullName: user?.fullName || '',
-    email: user?.email || '',
+  const [formData, setFormData] = useState<FormData>({
+    fullName: '',
+    email: '',
     password: '',
-    phoneNumber: user?.phoneNumber || '',
-    role: user?.role || 'USER'
+    phoneNumber: '',
+    role: 'USER'
   })
+
+  useEffect(() => {
+    if (isOpen) {
+      if (mode === 'create') {
+        setFormData({
+          fullName: '',
+          email: '',
+          password: '',
+          phoneNumber: '',
+          role: 'USER'
+        })
+      } else if ((mode === 'edit' || mode === 'view') && user) {
+        setFormData({
+          fullName: user.fullName || '',
+          email: user.email || '',
+          password: '',
+          phoneNumber: user.phoneNumber || '',
+          role: user.role || 'USER'
+        })
+      }
+    }
+  }, [isOpen, mode, user])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -64,12 +102,23 @@ export default function UserDialog({
       const url = mode === 'create' ? '/api/users' : `/api/users/${user?.id}`
       const method = mode === 'create' ? 'POST' : 'PUT'
       
+      const submitData: SubmitData = {
+        fullName: formData.fullName,
+        email: formData.email,
+        phoneNumber: formData.phoneNumber,
+        role: formData.role
+      }
+      
+      if (mode === 'create' || formData.password.trim()) {
+        submitData.password = formData.password
+      }
+      
       const response = await fetch(url, {
         method,
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify(formData),
+        body: JSON.stringify(submitData),
       })
 
       const data = await response.json()
@@ -78,9 +127,18 @@ export default function UserDialog({
         throw new Error(data.error || 'Something went wrong')
       }
 
-      toast.success(data.message)
+      toast.success(data.message || `User ${mode === 'create' ? 'created' : 'updated'} successfully`)
       onSuccess()
       onClose()
+      
+      // Reset form setelah sukses
+      setFormData({
+        fullName: '',
+        email: '',
+        password: '',
+        phoneNumber: '',
+        role: 'USER'
+      })
     } catch (error: any) {
       toast.error(error.message)
     } finally {
@@ -88,24 +146,36 @@ export default function UserDialog({
     }
   }
 
-  const handleInputChange = (field: string, value: string) => {
+  const handleInputChange = (field: keyof FormData, value: string) => {
     setFormData(prev => ({
       ...prev,
       [field]: value
     }))
   }
 
+  const handleClose = () => {
+    // Reset form saat dialog ditutup
+    setFormData({
+      fullName: '',
+      email: '',
+      password: '',
+      phoneNumber: '',
+      role: 'USER'
+    })
+    onClose()
+  }
+
   const getTitle = () => {
     switch (mode) {
       case 'create': return 'Add New User'
-      case 'edit': return 'Edit User'
-      case 'view': return 'User Details'
+      case 'edit': return `Edit User - ${user?.fullName}`
+      case 'view': return `User Details - ${user?.fullName}`
       default: return 'User'
     }
   }
 
   return (
-    <Dialog open={isOpen} onOpenChange={onClose}>
+    <Dialog open={isOpen} onOpenChange={handleClose}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle>{getTitle()}</DialogTitle>
@@ -156,6 +226,7 @@ export default function UserDialog({
                 onChange={(e) => handleInputChange('fullName', e.target.value)}
                 placeholder="Enter full name"
                 required
+                autoComplete="name"
               />
             </div>
 
@@ -168,6 +239,7 @@ export default function UserDialog({
                 onChange={(e) => handleInputChange('email', e.target.value)}
                 placeholder="Enter email address"
                 required
+                autoComplete="email"
               />
             </div>
 
@@ -182,6 +254,7 @@ export default function UserDialog({
                 onChange={(e) => handleInputChange('password', e.target.value)}
                 placeholder={mode === 'create' ? 'Enter password' : 'Enter new password'}
                 required={mode === 'create'}
+                autoComplete={mode === 'create' ? 'new-password' : 'current-password'}
               />
             </div>
 
@@ -193,6 +266,7 @@ export default function UserDialog({
                 onChange={(e) => handleInputChange('phoneNumber', e.target.value)}
                 placeholder="Enter phone number"
                 required
+                autoComplete="tel"
               />
             </div>
 
@@ -200,7 +274,7 @@ export default function UserDialog({
               <Label htmlFor="role">Role *</Label>
               <Select 
                 value={formData.role} 
-                onValueChange={(value) => handleInputChange('role', value)}
+                onValueChange={(value: 'USER' | 'ADMIN') => handleInputChange('role', value)}
               >
                 <SelectTrigger>
                   <SelectValue placeholder="Select role" />
@@ -213,11 +287,18 @@ export default function UserDialog({
             </div>
 
             <DialogFooter>
-              <Button type="button" variant="outline" onClick={onClose}>
+              <Button type="button" variant="outline" onClick={handleClose} disabled={isLoading}>
                 Cancel
               </Button>
               <Button type="submit" disabled={isLoading}>
-                {isLoading ? 'Saving...' : mode === 'create' ? 'Create User' : 'Update User'}
+                {isLoading ? (
+                  <>
+                    <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin mr-2" />
+                    Saving...
+                  </>
+                ) : (
+                  mode === 'create' ? 'Create User' : 'Update User'
+                )}
               </Button>
             </DialogFooter>
           </form>
@@ -225,7 +306,7 @@ export default function UserDialog({
 
         {mode === 'view' && (
           <DialogFooter>
-            <Button onClick={onClose}>Close</Button>
+            <Button onClick={handleClose}>Close</Button>
           </DialogFooter>
         )}
       </DialogContent>
