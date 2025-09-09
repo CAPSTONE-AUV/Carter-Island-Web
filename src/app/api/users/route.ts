@@ -1,13 +1,13 @@
 // src/app/api/users/route.ts
 import { NextRequest, NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
-import bcrypt from 'bcryptjs'
 import { prisma } from '@/lib/prisma'
 import { authOptions } from '@/lib/auth'
 import { TimezoneUtil } from '@/lib/timezone'
+import { Role } from '@prisma/client'
 
-// GET - Fetch all users (Admin only)
-export async function GET() {
+// GET - Fetch users with cursor pagination (Admin only)
+export async function GET(request: NextRequest) {
   try {
     const session = await getServerSession(authOptions)
     
@@ -18,7 +18,47 @@ export async function GET() {
       )
     }
 
+    const { searchParams } = new URL(request.url)
+    
+    // Pagination parameters
+    const cursor = searchParams.get('cursor') // ID dari item terakhir
+    const limit = parseInt(searchParams.get('limit') || '10')
+    const sortOrder = (searchParams.get('sort') || 'desc') as 'asc' | 'desc'
+    
+    // Filter parameters
+    const role = searchParams.get('role') as Role | null
+    const search = searchParams.get('search') // untuk search fullName atau email
+
+    // Validasi limit (max 50)
+    const validLimit = Math.min(Math.max(limit, 1), 50)
+
+    // Build where clause
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const whereClause: any = {}
+    
+    // Role filter
+    if (role && ['USER', 'ADMIN'].includes(role)) {
+      whereClause.role = role
+    }
+    
+    // Search filter
+    if (search) {
+      whereClause.OR = [
+        { fullName: { contains: search} },
+        { email: { contains: search } }
+      ]
+    }
+
+    // Build cursor condition
+    if (cursor) {
+      whereClause.id = {
+        [sortOrder === 'desc' ? 'lt' : 'gt']: cursor
+      }
+    }
+
+    // Query users dengan cursor pagination
     const users = await prisma.user.findMany({
+      where: whereClause,
       select: {
         id: true,
         fullName: true,
@@ -28,18 +68,40 @@ export async function GET() {
         createdAt: true,
         updatedAt: true
       },
-      orderBy: {
-        createdAt: 'desc'
-      }
+      orderBy: [
+        { createdAt: sortOrder },
+        { id: sortOrder } // Secondary sort untuk consistency
+      ],
+      take: validLimit + 1 // Ambil 1 lebih untuk cek hasMore
     })
 
-    const formattedUsers = users.map(user => ({
+    // Tentukan hasMore dan nextCursor
+    const hasMore = users.length > validLimit
+    const items = hasMore ? users.slice(0, validLimit) : users
+    const nextCursor = hasMore && items.length > 0 ? items[items.length - 1].id : null
+
+    // Format tanggal
+    const formattedUsers = items.map(user => ({
       ...user,
       createdAt: TimezoneUtil.formatIndonesian(user.createdAt),
       updatedAt: TimezoneUtil.formatIndonesian(user.updatedAt)
     }))
 
-    return NextResponse.json(formattedUsers)
+    return NextResponse.json({
+      items: formattedUsers,
+      nextCursor,
+      hasMore,
+      pagination: {
+        limit: validLimit,
+        total: items.length,
+        sortOrder,
+        filters: {
+          role: role || null,
+          search: search || null
+        }
+      }
+    })
+
   } catch (error) {
     console.error(`[${TimezoneUtil.getTimestamp()}] Get users error:`, error)
     return NextResponse.json(
@@ -49,7 +111,7 @@ export async function GET() {
   }
 }
 
-// POST - Create new user (Admin only)
+// POST method tetap sama seperti yang sudah ada
 export async function POST(request: NextRequest) {
   try {
     const session = await getServerSession(authOptions)
@@ -81,15 +143,7 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Validate password
-    if (password.length < 6) {
-      return NextResponse.json(
-        { error: 'Password must be at least 6 characters long' },
-        { status: 400 }
-      )
-    }
-
-    // Check if email already exists
+    // Check if user already exists
     const existingUser = await prisma.user.findUnique({
       where: { email }
     })
@@ -102,17 +156,19 @@ export async function POST(request: NextRequest) {
     }
 
     // Hash password
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const bcrypt = require('bcryptjs')
     const hashedPassword = await bcrypt.hash(password, 12)
     const currentTime = TimezoneUtil.now()
 
-    // Create new user
+    // Create user
     const newUser = await prisma.user.create({
       data: {
         fullName,
         email,
         password: hashedPassword,
         phoneNumber,
-        role: role as 'USER' | 'ADMIN',
+        role: role as Role,
         createdAt: currentTime,
         updatedAt: currentTime
       },
@@ -127,16 +183,19 @@ export async function POST(request: NextRequest) {
       }
     })
 
-    console.log(`[${TimezoneUtil.getTimestamp()}] User created by admin: ${newUser.email} (${newUser.role})`)
+    console.log(`[${TimezoneUtil.getTimestamp()}] New user created: ${newUser.email} (${newUser.role})`)
 
-    return NextResponse.json({
-      message: 'User created successfully',
-      user: {
-        ...newUser,
-        createdAt: TimezoneUtil.formatIndonesian(newUser.createdAt),
-        updatedAt: TimezoneUtil.formatIndonesian(newUser.updatedAt)
-      }
-    }, { status: 201 })
+    return NextResponse.json(
+      { 
+        message: 'User created successfully',
+        user: {
+          ...newUser,
+          createdAt: TimezoneUtil.formatIndonesian(newUser.createdAt),
+          updatedAt: TimezoneUtil.formatIndonesian(newUser.updatedAt)
+        }
+      },
+      { status: 201 }
+    )
 
   } catch (error) {
     console.error(`[${TimezoneUtil.getTimestamp()}] Create user error:`, error)

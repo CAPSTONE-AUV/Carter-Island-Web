@@ -22,5 +22,10 @@ model User {
   createdAt   DateTime @default(now()) @map("created_at")
   updatedAt   DateTime @updatedAt @map("updated_at")
 
+  // Index untuk cursor pagination
+  @@index([createdAt, id], map: "idx_users_created_at_id")           
+  @@index([role, createdAt, id], map: "idx_users_role_created_at_id")     
+  @@index([createdAt(sort: Desc), id(sort: Desc)], map: "idx_users_created_desc_id_desc")
+
   @@map("users")
 }
