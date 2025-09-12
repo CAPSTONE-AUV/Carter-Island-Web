@@ -29,3 +29,26 @@ model User {
 
   @@map("users")
 }
+
+model Detection {
+  id            Int      @id @default(autoincrement())
+  timestamp     DateTime
+  fishCount     Int      @map("fish_count")
+  results       String   @db.Text  // ✅ String dengan @db.Text untuk MySQL
+  fishDetections FishDetection[]
+  createdAt     DateTime @default(now()) @map("created_at")
+  
+  @@map("detections")
+}
+
+model FishDetection {
+  id           Int       @id @default(autoincrement())
+  detectionId  Int       @map("detection_id")
+  fishName     String    @db.VarChar(100) @map("fish_name")
+  confidence   Float
+  boundingBox  String    @db.Text @map("bounding_box")  // ✅ String dengan @db.Text
+  detection    Detection @relation(fields: [detectionId], references: [id], onDelete: Cascade)
+  createdAt    DateTime  @default(now()) @map("created_at")
+  
+  @@map("fish_detections")
+}
