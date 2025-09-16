@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 # Global variables
 peer_connections: Dict[str, RTCPeerConnection] = {}
 active_connections: Set[WebSocket] = set()
-custom_model = None  # Your custom model will be loaded here
+custom_model = None
 inference_executor = ThreadPoolExecutor(max_workers=2)
 inference_queue = queue.Queue(maxsize=3)
 
@@ -168,8 +168,6 @@ class CustomModelVideoStreamTrack(VideoStreamTrack):
             if hasattr(outputs, 'detach'):
                 outputs = outputs.detach().cpu().numpy()
             
-            # Add your custom processing here if not using YOLO
-            
         except Exception as e:
             logger.error(f"Error processing model outputs: {e}")
         
@@ -186,18 +184,14 @@ class CustomModelVideoStreamTrack(VideoStreamTrack):
         
         if custom_model is not None and should_inference:
             try:
-                # Preprocess frame
                 processed_img, scale, pad_x, pad_y = self.preprocess_frame(img)
                 
-                # Run inference in thread pool (non-blocking)
                 if not inference_queue.full():
                     future = inference_executor.submit(self.run_inference, processed_img, original_shape)
                     try:
-                        # Wait max 50ms for results
                         detections = future.result(timeout=0.05)
                         self.last_detections = detections
                     except:
-                        # Use last detections if inference timeout
                         pass
                         
             except Exception as e:
@@ -404,6 +398,29 @@ def load_custom_model():
         logger.error(traceback.format_exc())
         device_info = "Error"
 
+# Cleanup function for peer connections
+async def cleanup_peer_connection(client_id: str):
+    """Clean up peer connection properly"""
+    if client_id in peer_connections:
+        try:
+            pc = peer_connections[client_id]
+            # Close all transceivers
+            for transceiver in pc.getTransceivers():
+                if transceiver.receiver.track:
+                    transceiver.receiver.track.stop()
+                if transceiver.sender.track:
+                    transceiver.sender.track.stop()
+            
+            # Close peer connection
+            await pc.close()
+            logger.info(f"Peer connection for {client_id} closed properly")
+        except Exception as e:
+            logger.error(f"Error closing peer connection for {client_id}: {e}")
+        finally:
+            # Remove from dictionary
+            peer_connections.pop(client_id, None)
+            logger.info(f"Peer connection for {client_id} removed from registry")
+
 # Lifespan context manager for startup and shutdown
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -414,6 +431,16 @@ async def lifespan(app: FastAPI):
     # Shutdown
     logger.info("Shutting down...")
     try:
+        # Clean up all peer connections
+        cleanup_tasks = []
+        for client_id in list(peer_connections.keys()):
+            task = asyncio.create_task(cleanup_peer_connection(client_id))
+            cleanup_tasks.append(task)
+        
+        if cleanup_tasks:
+            await asyncio.gather(*cleanup_tasks, return_exceptions=True)
+        
+        # Shutdown executor
         inference_executor.shutdown(wait=True)
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
@@ -454,21 +481,30 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
                 await handle_ice_candidate(client_id, message, websocket)
                 
     except WebSocketDisconnect:
-        active_connections.discard(websocket)
-        if client_id in peer_connections:
-            try:
-                await peer_connections[client_id].close()
-            except:
-                pass
-            del peer_connections[client_id]
-        logger.info(f"Client {client_id} disconnected")
+        logger.info(f"WebSocket disconnect for client {client_id}")
     except Exception as e:
         logger.error(f"WebSocket error for client {client_id}: {e}")
+    finally:
+        # Clean up connection properly
         active_connections.discard(websocket)
+        
+        # Clean up peer connection asynchronously
+        if client_id in peer_connections:
+            try:
+                await cleanup_peer_connection(client_id)
+            except Exception as e:
+                logger.error(f"Error during cleanup for {client_id}: {e}")
+        
+        logger.info(f"Client {client_id} fully disconnected and cleaned up")
 
 async def handle_offer(client_id: str, message: dict, websocket: WebSocket):
     """Handle WebRTC offer"""
     try:
+        # Clean up any existing connection for this client first
+        if client_id in peer_connections:
+            logger.info(f"Cleaning up existing connection for {client_id}")
+            await cleanup_peer_connection(client_id)
+        
         from aiortc import RTCConfiguration, RTCIceServer
         rtc_config = RTCConfiguration(iceServers=[
             RTCIceServer(urls="stun:stun.l.google.com:19302"),
@@ -481,9 +517,8 @@ async def handle_offer(client_id: str, message: dict, websocket: WebSocket):
         @pc.on("connectionstatechange")
         async def on_connectionstatechange():
             logger.info(f"Client {client_id} connection state: {pc.connectionState}")
-            if pc.connectionState == "failed":
-                await pc.close()
-                peer_connections.pop(client_id, None)
+            if pc.connectionState in ["failed", "closed"]:
+                await cleanup_peer_connection(client_id)
         
         @pc.on("track")
         def on_track(track):
@@ -493,6 +528,11 @@ async def handle_offer(client_id: str, message: dict, websocket: WebSocket):
                 # Create custom model track
                 custom_track = CustomModelVideoStreamTrack(track)
                 pc.addTrack(custom_track)
+                
+                # Handle track ending
+                @track.on("ended")
+                async def on_track_ended():
+                    logger.info(f"Track ended for {client_id}")
         
         # Set remote description
         await pc.setRemoteDescription(
@@ -513,6 +553,8 @@ async def handle_offer(client_id: str, message: dict, websocket: WebSocket):
         
     except Exception as e:
         logger.error(f"Error handling offer from {client_id}: {e}")
+        # Clean up on error
+        await cleanup_peer_connection(client_id)
 
 async def handle_answer(client_id: str, message: dict, websocket: WebSocket):
     """Handle WebRTC answer"""
@@ -571,6 +613,7 @@ async def health_check():
         "device": device_info,
         "model_loaded": custom_model is not None,
         "active_connections": len(active_connections),
+        "active_peer_connections": len(peer_connections),
         "fps": current_fps,
         "inference_fps": current_inference_fps,
         "model_info": model_info,
@@ -586,6 +629,7 @@ async def get_performance():
         "fps": round(current_fps, 2),
         "inference_fps": round(current_inference_fps, 2),
         "active_connections": len(active_connections),
+        "active_peer_connections": len(peer_connections),
         "device": device_info,
         "model_loaded": custom_model is not None,
         "cuda_available": torch.cuda.is_available()

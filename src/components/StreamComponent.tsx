@@ -28,11 +28,12 @@ export default function StreamComponent({
   const localVideoRef = useRef<HTMLVideoElement>(null);
   const remoteVideoRef = useRef<HTMLVideoElement>(null);
   
+  const [isClient, setIsClient] = useState(false);
+  const [clientId, setClientId] = useState('');
   const [isStreaming, setIsStreaming] = useState(false);
-  const [connectionStatus, setConnectionStatus] = useState<'disconnected' | 'connecting' | 'connected' | 'error'>('disconnected');
+  const [connectionStatus, setConnectionStatus] = useState<'disconnected' | 'connected' | 'error'>('disconnected');
   const [modelInfo, setModelInfo] = useState<ModelInfo | null>(null);
   const [performanceData, setPerformanceData] = useState<PerformanceData | null>(null);
-  const [error, setError] = useState<string>('');
   const [logs, setLogs] = useState<string[]>([]);
 
   const websocketRef = useRef<WebSocket | null>(null);
@@ -40,7 +41,11 @@ export default function StreamComponent({
   const localStreamRef = useRef<MediaStream | null>(null);
   const performanceIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
-  const clientId = useRef(Math.random().toString(36).substring(7)).current;
+  // Initialize client-only code
+  useEffect(() => {
+    setIsClient(true);
+    setClientId(Math.random().toString(36).substring(7));
+  }, []);
 
   const addLog = useCallback((message: string) => {
     const timestamp = new Date().toLocaleTimeString();
@@ -49,6 +54,8 @@ export default function StreamComponent({
 
   // Fetch model info
   useEffect(() => {
+    if (!isClient) return;
+    
     const fetchModelInfo = async () => {
       try {
         const httpUrl = apiUrl.replace('ws://', 'http://').replace('wss://', 'https://');
@@ -61,16 +68,17 @@ export default function StreamComponent({
         }
       } catch (error) {
         console.error('Error fetching model info:', error);
-        setError('Failed to fetch model info');
         addLog('Failed to fetch model info');
       }
     };
     
     fetchModelInfo();
-  }, [apiUrl, addLog]);
+  }, [apiUrl, addLog, isClient]);
 
   // Performance monitoring
   useEffect(() => {
+    if (!isClient) return;
+    
     const monitorPerformance = async () => {
       try {
         const httpUrl = apiUrl.replace('ws://', 'http://').replace('wss://', 'https://');
@@ -94,15 +102,15 @@ export default function StreamComponent({
         clearInterval(performanceIntervalRef.current);
       }
     };
-  }, [apiUrl, isStreaming]);
+  }, [apiUrl, isStreaming, isClient]);
 
   const initializeWebRTC = async () => {
+    if (!isClient || !clientId) return;
+    
     try {
-      setError('');
-      setConnectionStatus('connecting');
+      setConnectionStatus('disconnected');
       addLog('Initializing WebRTC connection...');
       
-      // Setup WebSocket
       websocketRef.current = new WebSocket(`${apiUrl}/ws/${clientId}`);
       
       websocketRef.current.onopen = () => {
@@ -123,7 +131,6 @@ export default function StreamComponent({
       websocketRef.current.onerror = (error) => {
         console.error('WebSocket error:', error);
         setConnectionStatus('error');
-        setError('WebSocket connection failed');
         addLog('WebSocket connection failed');
       };
 
@@ -132,7 +139,6 @@ export default function StreamComponent({
         addLog(`WebSocket closed: ${event.code}`);
       };
 
-      // Setup WebRTC with optimized configuration
       peerConnectionRef.current = new RTCPeerConnection({
         iceServers: [
           { urls: 'stun:stun.l.google.com:19302' },
@@ -171,25 +177,22 @@ export default function StreamComponent({
     } catch (error) {
       console.error('Error initializing WebRTC:', error);
       setConnectionStatus('error');
-      setError('Failed to initialize WebRTC');
       addLog('Failed to initialize WebRTC');
     }
   };
 
   const startStream = async () => {
     try {
-      setError('');
       addLog('Starting camera stream...');
       
-      // Request camera dengan optimized settings untuk GPU processing
       const stream = await navigator.mediaDevices.getUserMedia({
         video: { 
           width: { ideal: 1280, max: 1920 },
           height: { ideal: 720, max: 1080 },
           frameRate: { ideal: 30, max: 60 },
-          facingMode: 'environment' // Use back camera jika available
+          facingMode: 'environment'
         },
-        audio: false // Disable audio untuk focus pada video processing
+        audio: false
       });
 
       localStreamRef.current = stream;
@@ -199,13 +202,11 @@ export default function StreamComponent({
         addLog(`Camera resolution: ${stream.getVideoTracks()[0].getSettings().width}x${stream.getVideoTracks()[0].getSettings().height}`);
       }
 
-      // Add tracks to peer connection
       if (peerConnectionRef.current) {
         stream.getTracks().forEach(track => {
           peerConnectionRef.current!.addTrack(track, stream);
         });
 
-        // Create and send offer
         const offer = await peerConnectionRef.current.createOffer({
           offerToReceiveVideo: true,
           offerToReceiveAudio: false
@@ -228,7 +229,6 @@ export default function StreamComponent({
     } catch (error) {
       console.error('Error starting stream:', error);
       const errorMsg = error instanceof Error ? error.message : String(error);
-      setError(`Failed to start stream: ${errorMsg}`);
       addLog(`Failed to start stream: ${errorMsg}`);
     }
   };
@@ -310,194 +310,165 @@ export default function StreamComponent({
   };
 
   useEffect(() => {
-    initializeWebRTC();
+    if (isClient && clientId) {
+      initializeWebRTC();
 
-    return () => {
-      stopStream();
-    };
-  }, []);
+      return () => {
+        stopStream();
+      };
+    }
+  }, [isClient, clientId]);
 
   const getStatusColor = (status: string) => {
     switch (status) {
       case 'connected':
-        return 'bg-green-100 text-green-800 border-green-300';
-      case 'connecting':
-        return 'bg-yellow-100 text-yellow-800 border-yellow-300';
+        return 'bg-emerald-50 text-emerald-700 border-emerald-200';
       case 'error':
-        return 'bg-red-100 text-red-800 border-red-300';
+        return 'bg-red-50 text-red-700 border-red-200';
       default:
-        return 'bg-gray-100 text-gray-800 border-gray-300';
+        return 'bg-slate-50 text-slate-700 border-slate-200';
     }
   };
 
-  const getStatusIcon = (status: string) => {
+  const getStatusIndicator = (status: string) => {
     switch (status) {
       case 'connected':
-        return '🟢';
-      case 'connecting':
-        return '🟡';
+        return <div className="w-2 h-2 bg-emerald-500 rounded-full"></div>;
       case 'error':
-        return '🔴';
+        return <div className="w-2 h-2 bg-red-500 rounded-full"></div>;
       default:
-        return '⚫';
+        return <div className="w-2 h-2 bg-slate-400 rounded-full"></div>;
     }
   };
 
   const getFpsColor = (fps: number) => {
-    if (fps >= 25) return 'text-green-600';
-    if (fps >= 15) return 'text-yellow-600';
+    if (fps >= 25) return 'text-emerald-600';
+    if (fps >= 15) return 'text-amber-600';
     return 'text-red-600';
   };
 
+  // Early return for SSR
+  if (!isClient) {
+    return (
+      <div className="min-h-screen bg-slate-50 p-6">
+        <div className="max-w-7xl mx-auto">
+          <div className="text-center">
+            <h1 className="text-3xl font-light text-slate-900 mb-2">
+              Carter Island Detection System
+            </h1>
+            <p className="text-slate-600">Loading...</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 via-indigo-50 to-purple-50 p-4">
-      <div className="max-w-7xl mx-auto">
+    <div className="min-h-screen bg-slate-50 p-6">
+      <div className="max-w-7xl mx-auto space-y-6">
         {/* Header */}
-        <div className="text-center mb-8">
-          <h1 className="text-4xl font-bold text-gray-800 mb-2 flex items-center justify-center gap-3">
-            🎯 Carter Island - GPU YOLO Detection
+        <div className="text-center">
+          <h1 className="text-3xl font-light text-slate-900 mb-2">
+            Carter Island Detection System
           </h1>
-          <p className="text-gray-600 text-lg">
-            Real-time object detection with NVIDIA GPU acceleration
+          <p className="text-slate-600">
+            Real-time object detection with GPU acceleration
           </p>
         </div>
 
         {/* Status Bar */}
-        <div className="bg-white rounded-lg shadow-md p-4 mb-6">
+        <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-4">
           <div className="flex flex-wrap items-center justify-between gap-4">
             <div className="flex items-center gap-4">
-              <div className={`px-4 py-2 rounded-lg border text-sm font-medium ${getStatusColor(connectionStatus)}`}>
-                {getStatusIcon(connectionStatus)} Status: {connectionStatus}
+              <div className={`px-4 py-2 rounded-lg border text-sm font-medium flex items-center gap-2 ${getStatusColor(connectionStatus)}`}>
+                {getStatusIndicator(connectionStatus)}
+                Status: {connectionStatus === 'error' ? 'websocket error' : connectionStatus}
               </div>
               
               {performanceData && (
                 <>
-                  <div className="px-3 py-2 bg-blue-50 rounded-lg border border-blue-200">
-                    <span className="text-blue-800 font-medium">
-                      📱 Device: {performanceData.device}
+                  <div className="px-3 py-2 bg-slate-50 rounded-lg border border-slate-200">
+                    <span className="text-slate-700 text-sm font-medium">
+                      Device: {performanceData.device}
                     </span>
                   </div>
                   
                   {performanceData.cuda_available && (
-                    <div className="px-3 py-2 bg-green-50 rounded-lg border border-green-200">
-                      <span className="text-green-800 font-medium">⚡ CUDA Enabled</span>
+                    <div className="px-3 py-2 bg-emerald-50 rounded-lg border border-emerald-200">
+                      <span className="text-emerald-700 text-sm font-medium">CUDA Enabled</span>
                     </div>
                   )}
                 </>
               )}
             </div>
-
+            
             <div className="flex gap-3">
+              <button
+                onClick={() => window.location.reload()}
+                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium transition-all duration-200 text-sm"
+              >
+                Refresh
+              </button>
               <button
                 onClick={startStream}
                 disabled={isStreaming || connectionStatus !== 'connected'}
-                className="px-6 py-2 bg-green-500 hover:bg-green-600 disabled:bg-gray-400 text-white rounded-lg font-medium transition-all duration-200 flex items-center gap-2 shadow-md hover:shadow-lg"
+                className="px-6 py-2 bg-slate-900 hover:bg-slate-800 disabled:bg-slate-400 text-white rounded-lg font-medium transition-all duration-200 text-sm"
               >
-                📹 {isStreaming ? 'Streaming...' : 'Start Stream'}
+                {isStreaming ? 'Streaming...' : 'Start Stream'}
               </button>
               <button
                 onClick={stopStream}
                 disabled={!isStreaming}
-                className="px-6 py-2 bg-red-500 hover:bg-red-600 disabled:bg-gray-400 text-white rounded-lg font-medium transition-all duration-200 flex items-center gap-2 shadow-md hover:shadow-lg"
+                className="px-6 py-2 bg-red-600 hover:bg-red-700 disabled:bg-slate-400 text-white rounded-lg font-medium transition-all duration-200 text-sm"
               >
-                ⏹️ Stop Stream
+                Stop Stream
               </button>
             </div>
           </div>
-
-          {error && (
-            <div className="mt-4 p-3 bg-red-50 border border-red-200 rounded-lg">
-              <p className="text-red-800 text-sm flex items-center gap-2">
-                ⚠️ {error}
-              </p>
-            </div>
-          )}
         </div>
 
-        {/* Performance Dashboard */}
-        {performanceData && isStreaming && (
-          <div className="bg-white rounded-lg shadow-md p-6 mb-6">
-            <h3 className="text-lg font-semibold text-gray-800 mb-4 flex items-center gap-2">
-              📊 Real-time Performance Monitor
-            </h3>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-              <div className="text-center p-4 bg-gradient-to-br from-green-50 to-green-100 rounded-lg">
-                <p className={`text-3xl font-bold ${getFpsColor(performanceData.fps)}`}>
-                  {performanceData.fps.toFixed(1)}
-                </p>
-                <p className="text-sm text-gray-600 font-medium">Render FPS</p>
-              </div>
-              <div className="text-center p-4 bg-gradient-to-br from-blue-50 to-blue-100 rounded-lg">
-                <p className={`text-3xl font-bold ${getFpsColor(performanceData.inference_fps)}`}>
-                  {performanceData.inference_fps.toFixed(1)}
-                </p>
-                <p className="text-sm text-gray-600 font-medium">Inference FPS</p>
-              </div>
-              <div className="text-center p-4 bg-gradient-to-br from-purple-50 to-purple-100 rounded-lg">
-                <p className="text-3xl font-bold text-purple-600">
-                  {performanceData.active_connections}
-                </p>
-                <p className="text-sm text-gray-600 font-medium">Connections</p>
-              </div>
-              <div className="text-center p-4 bg-gradient-to-br from-yellow-50 to-yellow-100 rounded-lg">
-                <p className="text-3xl font-bold text-yellow-600">
-                  {performanceData.model_loaded ? '✅' : '❌'}
-                </p>
-                <p className="text-sm text-gray-600 font-medium">Model Status</p>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Model Information */}
+        {/* Model Information - Compact Single Row */}
         {modelInfo && modelInfo.model_loaded && (
-          <div className="bg-white rounded-lg shadow-md p-6 mb-6">
-            <h3 className="text-lg font-semibold text-gray-800 mb-4 flex items-center gap-2">
-              🤖 Model Information
-            </h3>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
-              <div className="p-3 bg-gray-50 rounded-lg">
-                <p className="text-sm text-gray-600">Status</p>
-                <p className="font-medium text-green-600">✅ Model Loaded</p>
-              </div>
-              <div className="p-3 bg-gray-50 rounded-lg">
-                <p className="text-sm text-gray-600">Device</p>
-                <p className="font-medium">{modelInfo.device || 'Unknown'}</p>
-              </div>
-              <div className="p-3 bg-gray-50 rounded-lg">
-                <p className="text-sm text-gray-600">Classes</p>
-                <p className="font-medium">{modelInfo.num_classes || 0} classes</p>
-              </div>
-            </div>
-            {modelInfo.classes && (
-              <div>
-                <p className="text-sm text-gray-600 mb-3">Detected Classes:</p>
-                <div className="flex flex-wrap gap-2 max-h-32 overflow-y-auto">
-                  {Object.entries(modelInfo.classes).map(([id, className]) => (
-                    <span 
-                      key={id}
-                      className="px-3 py-1 bg-blue-100 text-blue-800 rounded-full text-xs font-medium"
-                    >
-                      {className}
-                    </span>
-                  ))}
+          <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-4">
+            <div className="flex flex-wrap items-center justify-between gap-4">
+              <h3 className="text-lg font-medium text-slate-900">
+                Model Information
+              </h3>
+              <div className="flex flex-wrap items-center gap-4">
+                <div className="flex items-center gap-2">
+                  <span className="text-sm text-slate-600">Status:</span>
+                  <span className="px-2 py-1 bg-emerald-50 text-emerald-700 rounded text-sm font-medium">
+                    Model Loaded
+                  </span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-sm text-slate-600">Device:</span>
+                  <span className="px-2 py-1 bg-slate-50 text-slate-700 rounded text-sm font-medium">
+                    {modelInfo.device || 'Unknown'}
+                  </span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-sm text-slate-600">Classes:</span>
+                  <span className="px-2 py-1 bg-slate-50 text-slate-700 rounded text-sm font-medium">
+                    {modelInfo.num_classes || 0} classes
+                  </span>
                 </div>
               </div>
-            )}
+            </div>
           </div>
         )}
 
-        {/* Video Grid */}
-        <div className="grid grid-cols-1 xl:grid-cols-3 gap-6 mb-6">
+        {/* Video Grid - 2 Videos Only */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           {/* Local Video */}
-          <div className="bg-white rounded-lg shadow-md overflow-hidden">
-            <div className="bg-gradient-to-r from-blue-500 to-blue-600 px-4 py-3">
-              <h3 className="text-lg font-semibold text-white flex items-center gap-2">
-                📷 Local Camera
+          <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+            <div className="border-b border-slate-200 px-4 py-3">
+              <h3 className="text-md font-medium text-slate-900">
+                Live Camera
               </h3>
             </div>
             <div className="p-4">
-              <div className="relative bg-black rounded-lg overflow-hidden" style={{ aspectRatio: '16/9' }}>
+              <div className="relative bg-slate-900 rounded-lg overflow-hidden" style={{ aspectRatio: '16/9' }}>
                 <video
                   ref={localVideoRef}
                   autoPlay
@@ -507,9 +478,9 @@ export default function StreamComponent({
                 />
                 {!isStreaming && (
                   <div className="absolute inset-0 flex items-center justify-center">
-                    <div className="text-center text-white">
-                      <div className="text-4xl mb-2">📷</div>
-                      <p className="text-lg">Camera Off</p>
+                    <div className="text-center text-slate-400">
+                      <div className="text-2xl mb-2">Camera</div>
+                      <p className="text-sm">Not Active</p>
                     </div>
                   </div>
                 )}
@@ -517,15 +488,15 @@ export default function StreamComponent({
             </div>
           </div>
 
-          {/* Processed Video */}
-          <div className="bg-white rounded-lg shadow-md overflow-hidden">
-            <div className="bg-gradient-to-r from-green-500 to-green-600 px-4 py-3">
-              <h3 className="text-lg font-semibold text-white flex items-center gap-2">
-                🎯 YOLO Detection
+          {/* YOLO Detection Video */}
+          <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+            <div className="border-b border-slate-200 px-4 py-3">
+              <h3 className="text-md font-medium text-slate-900">
+                YOLO Detection
               </h3>
             </div>
             <div className="p-4">
-              <div className="relative bg-black rounded-lg overflow-hidden" style={{ aspectRatio: '16/9' }}>
+              <div className="relative bg-slate-900 rounded-lg overflow-hidden" style={{ aspectRatio: '16/9' }}>
                 <video
                   ref={remoteVideoRef}
                   autoPlay
@@ -534,83 +505,91 @@ export default function StreamComponent({
                 />
                 {!isStreaming && (
                   <div className="absolute inset-0 flex items-center justify-center">
-                    <div className="text-center text-white">
-                      <div className="text-4xl mb-2">🎯</div>
-                      <p className="text-lg">No Detection Stream</p>
+                    <div className="text-center text-slate-400">
+                      <div className="text-2xl mb-2">YOLO</div>
+                      <p className="text-sm">No Stream</p>
                     </div>
                   </div>
                 )}
                 {isStreaming && (
-                  <div className="absolute top-2 left-2 bg-black bg-opacity-70 text-white px-2 py-1 rounded text-xs">
-                    Live Detection
+                  <div className="absolute top-2 left-2 bg-red-500 text-white px-2 py-1 rounded text-xs font-medium">
+                    LIVE
                   </div>
                 )}
-              </div>
-            </div>
-          </div>
-
-          {/* System Logs */}
-          <div className="bg-white rounded-lg shadow-md overflow-hidden">
-            <div className="bg-gradient-to-r from-purple-500 to-purple-600 px-4 py-3">
-              <h3 className="text-lg font-semibold text-white flex items-center gap-2">
-                📋 System Logs
-              </h3>
-            </div>
-            <div className="p-4">
-              <div className="bg-gray-900 rounded-lg p-3 h-64 overflow-y-auto">
-                <div className="space-y-1 text-sm font-mono">
-                  {logs.length > 0 ? logs.map((log, index) => (
-                    <div key={index} className="text-green-400">
-                      {log}
-                    </div>
-                  )) : (
-                    <div className="text-gray-500">No logs yet...</div>
-                  )}
-                </div>
               </div>
             </div>
           </div>
         </div>
 
-        {/* Instructions */}
-        <div className="bg-white rounded-lg shadow-md p-6">
-          <h3 className="text-lg font-semibold text-gray-800 mb-4 flex items-center gap-2">
-            📖 Instructions & Tips
+        {/* System Logs */}
+        <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+          <div className="border-b border-slate-200 px-4 py-3">
+            <h3 className="text-md font-medium text-slate-900">
+              System Logs
+            </h3>
+          </div>
+          <div className="p-4">
+            <div className="bg-slate-900 rounded-lg p-4 h-40 overflow-y-auto">
+              <div className="space-y-1 text-sm font-mono">
+                {logs.length > 0 ? logs.map((log, index) => (
+                  <div key={index} className="text-emerald-400">
+                    {log}
+                  </div>
+                )) : (
+                  <div className="text-slate-500">No logs available</div>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Performance Dashboard - Moved Below Logs */}
+        {performanceData && isStreaming && (
+          <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
+            <h3 className="text-lg font-medium text-slate-900 mb-4">
+              Performance Monitor
+            </h3>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              <div className="text-center p-4 bg-slate-50 rounded-lg">
+                <p className={`text-3xl font-light ${getFpsColor(performanceData.fps)}`}>
+                  {performanceData.fps.toFixed(1)}
+                </p>
+                <p className="text-sm text-slate-600 mt-1">Render FPS</p>
+              </div>
+              <div className="text-center p-4 bg-slate-50 rounded-lg">
+                <p className={`text-3xl font-light ${getFpsColor(performanceData.inference_fps)}`}>
+                  {performanceData.inference_fps.toFixed(1)}
+                </p>
+                <p className="text-sm text-slate-600 mt-1">Inference FPS</p>
+              </div>
+              <div className="text-center p-4 bg-slate-50 rounded-lg">
+                <p className="text-3xl font-light text-slate-700">
+                  {performanceData.active_connections}
+                </p>
+                <p className="text-sm text-slate-600 mt-1">Connections</p>
+              </div>
+              <div className="text-center p-4 bg-slate-50 rounded-lg">
+                <p className="text-3xl font-light text-slate-700">
+                  {performanceData.model_loaded ? 'Active' : 'Inactive'}
+                </p>
+                <p className="text-sm text-slate-600 mt-1">Model Status</p>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Troubleshooting Only */}
+        <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
+          <h3 className="text-lg font-medium text-slate-900 mb-4">
+            Troubleshooting
           </h3>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 text-sm text-gray-600">
-            <div>
-              <h4 className="font-medium text-gray-800 mb-3 flex items-center gap-2">
-                🚀 Getting Started
-              </h4>
-              <ol className="list-decimal list-inside space-y-2">
-                <li>Ensure backend is running with CUDA support</li>
-                <li>Allow camera permissions when prompted</li>
-                <li>Click "Start Stream" to begin detection</li>
-                <li>Monitor real-time performance metrics</li>
-              </ol>
-            </div>
-            <div>
-              <h4 className="font-medium text-gray-800 mb-3 flex items-center gap-2">
-                ⚡ Performance Optimization
-              </h4>
-              <ul className="list-disc list-inside space-y-2">
-                <li>GPU acceleration automatically enabled</li>
-                <li>Optimized frame processing pipeline</li>
-                <li>Adaptive inference frame skipping</li>
-                <li>Multi-threaded processing</li>
-              </ul>
-            </div>
-            <div>
-              <h4 className="font-medium text-gray-800 mb-3 flex items-center gap-2">
-                🔧 Troubleshooting
-              </h4>
-              <ul className="list-disc list-inside space-y-2">
-                <li>Check CUDA installation for GPU support</li>
-                <li>Verify backend health at <code className="bg-gray-100 px-1 rounded text-xs">localhost:8000</code></li>
-                <li>Monitor system logs for errors</li>
-                <li>Restart if FPS drops significantly</li>
-              </ul>
-            </div>
+          <div className="text-sm text-slate-600">
+            <ul className="list-disc list-inside space-y-2">
+              <li>Check CUDA installation for GPU support</li>
+              <li>Verify backend health at localhost:8000</li>
+              <li>Monitor system logs for errors</li>
+              <li>Restart if FPS drops significantly</li>
+            </ul>
           </div>
         </div>
       </div>
