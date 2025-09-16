@@ -76,7 +76,6 @@ share/python-wheels/
 MANIFEST
 
 # PyTorch Models & Weights
-src/backend/models/*.pt
 src/backend/models/*.pth
 src/backend/models/*.onnx
 src/backend/models/*.weights
