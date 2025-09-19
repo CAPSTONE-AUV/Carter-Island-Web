@@ -1,6 +1,9 @@
 'use client';
 
 import { useEffect, useRef, useState, useCallback } from 'react';
+import Header from '@/components/layout/Header';
+import { Card, CardContent } from '@/components/ui/card'
+import { Button } from '@/components/ui/button'
 
 interface StreamComponentProps {
   apiUrl?: string;
@@ -52,28 +55,66 @@ export default function StreamComponent({
     setLogs(prev => [`[${timestamp}] ${message}`, ...prev.slice(0, 9)]);
   }, []);
 
+  const waitForSocketOpen = (ws: WebSocket, timeoutMs = 5000) =>
+    new Promise<void>((resolve, reject) => {
+      if (ws.readyState === WebSocket.OPEN) return resolve();
+      const onOpen = () => { ws.removeEventListener('open', onOpen); resolve(); };
+      const onError = (e: Event) => { ws.removeEventListener('error', onError); reject(e); };
+      const timer = setTimeout(() => {
+        ws.removeEventListener('open', onOpen);
+        ws.removeEventListener('error', onError);
+        reject(new Error('WebSocket open timeout'));
+      }, timeoutMs);
+      ws.addEventListener('open', () => { clearTimeout(timer); onOpen(); });
+      ws.addEventListener('error', onError);
+    });
+
+  const ensureSignalingReady = async () => {
+    // jika websocket/peer sudah ditutup saat stop, buat baru
+    if (!websocketRef.current || websocketRef.current.readyState !== WebSocket.OPEN) {
+      // inisialisasi ulang WS + RTCPeerConnection
+      await initializeWebRTC();
+      if (websocketRef.current) {
+        await waitForSocketOpen(websocketRef.current);
+      }
+    }
+    // initializeWebRTC sudah membuat peerConnectionRef; kalau masih null, buat ulang
+    if (!peerConnectionRef.current) {
+      await initializeWebRTC();
+      if (websocketRef.current) {
+        await waitForSocketOpen(websocketRef.current);
+      }
+    }
+  };
+
   // Fetch model info
   useEffect(() => {
-    if (!isClient) return;
-    
     const fetchModelInfo = async () => {
       try {
-        const httpUrl = apiUrl.replace('ws://', 'http://').replace('wss://', 'https://');
-        const response = await fetch(`${httpUrl}/api/model-info`);
-        const data = await response.json();
+        // pakai base HTTP dari env; fallback dihitung dari WS url
+        const httpBase =
+          process.env.NEXT_PUBLIC_API_URL ??
+          (() => {
+            const u = new URL(apiUrl);            // contoh: ws://localhost:8000/ws
+            const proto = u.protocol === 'wss:' ? 'https:' : 'http:';
+            return `${proto}//${u.host}`;         // -> http://localhost:8000
+          })();
+
+        const res = await fetch(`${httpBase.replace(/\/$/, '')}/api/model-info`, { mode: 'cors' });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+        const data = await res.json();
         setModelInfo(data);
         addLog(`Model loaded: ${data.model_loaded ? 'Yes' : 'No'}`);
-        if (data.device) {
-          addLog(`Device: ${data.device}`);
-        }
-      } catch (error) {
-        console.error('Error fetching model info:', error);
+      } catch (err) {
+        console.warn('Failed to fetch /api/model-info', err);
         addLog('Failed to fetch model info');
       }
     };
-    
+
     fetchModelInfo();
-  }, [apiUrl, addLog, isClient]);
+  }, [apiUrl]);
+
 
   // Performance monitoring
   useEffect(() => {
@@ -128,15 +169,18 @@ export default function StreamComponent({
         }
       };
 
-      websocketRef.current.onerror = (error) => {
-        console.error('WebSocket error:', error);
+      websocketRef.current.onerror = (event) => {
+      if (process.env.NODE_ENV === 'development') {
+        // eslint-disable-next-line no-console
+        console.warn('WS error event:', event);
+      }  
         setConnectionStatus('error');
         addLog('WebSocket connection failed');
       };
 
-      websocketRef.current.onclose = (event) => {
-        setConnectionStatus('disconnected');
-        addLog(`WebSocket closed: ${event.code}`);
+      websocketRef.current.onclose = (evt: CloseEvent) => {
+        // onclose biasanya lebih informatif dibanding onerror
+        console.warn('WS closed:', evt.code, evt.reason);
       };
 
       peerConnectionRef.current = new RTCPeerConnection({
@@ -184,99 +228,98 @@ export default function StreamComponent({
   const startStream = async () => {
     try {
       addLog('Starting camera stream...');
-      
+
+      // Pastikan WS & RTCPeerConnection siap
+      await ensureSignalingReady();
+
+      // Ambil kamera
       const stream = await navigator.mediaDevices.getUserMedia({
-        video: { 
-          width: { ideal: 1280, max: 1920 },
-          height: { ideal: 720, max: 1080 },
-          frameRate: { ideal: 30, max: 60 },
-          facingMode: 'environment'
-        },
+        video: { width: { ideal: 1280, max: 1920 }, height: { ideal: 720, max: 1080 }, frameRate: { ideal: 30, max: 60 }, facingMode: 'environment' },
         audio: false
       });
 
       localStreamRef.current = stream;
-      
+
       if (localVideoRef.current) {
         localVideoRef.current.srcObject = stream;
-        addLog(`Camera resolution: ${stream.getVideoTracks()[0].getSettings().width}x${stream.getVideoTracks()[0].getSettings().height}`);
+        const s = stream.getVideoTracks()[0].getSettings();
+        addLog(`Camera resolution: ${s.width}x${s.height}`);
       }
 
-      if (peerConnectionRef.current) {
-        stream.getTracks().forEach(track => {
-          peerConnectionRef.current!.addTrack(track, stream);
-        });
+      // Tambahkan track ke peer
+      stream.getTracks().forEach(t => peerConnectionRef.current!.addTrack(t, stream));
 
-        const offer = await peerConnectionRef.current.createOffer({
-          offerToReceiveVideo: true,
-          offerToReceiveAudio: false
-        });
-        await peerConnectionRef.current.setLocalDescription(offer);
+      // Buat offer
+      const offer = await peerConnectionRef.current!.createOffer({
+        offerToReceiveVideo: true, offerToReceiveAudio: false
+      });
+      await peerConnectionRef.current!.setLocalDescription(offer);
 
-        if (websocketRef.current && websocketRef.current.readyState === WebSocket.OPEN) {
-          websocketRef.current.send(JSON.stringify({
-            type: 'offer',
-            sdp: offer.sdp
-          }));
-          addLog('WebRTC offer sent');
-        } else {
-          throw new Error('WebSocket not connected');
-        }
+      // Kirim offer lewat WS
+      if (!websocketRef.current || websocketRef.current.readyState !== WebSocket.OPEN) {
+        throw new Error('WebSocket not connected');
       }
+      websocketRef.current.send(JSON.stringify({ type: 'offer', sdp: offer.sdp }));
+      addLog('WebRTC offer sent');
 
       setIsStreaming(true);
       addLog('Stream started successfully');
-    } catch (error) {
-      console.error('Error starting stream:', error);
-      const errorMsg = error instanceof Error ? error.message : String(error);
-      addLog(`Failed to start stream: ${errorMsg}`);
+    } catch (err) {
+      console.error('Error starting stream:', err);
+      addLog(`Failed to start stream: ${err instanceof Error ? err.message : String(err)}`);
+      setIsStreaming(false);
     }
   };
 
   const stopStream = () => {
     try {
       addLog('Stopping stream...');
-      
+
+      // Hentikan kamera
       if (localStreamRef.current) {
-        localStreamRef.current.getTracks().forEach(track => {
-          track.stop();
-        });
+        localStreamRef.current.getTracks().forEach(t => t.stop());
         localStreamRef.current = null;
       }
+      if (localVideoRef.current) localVideoRef.current.srcObject = null;
+      if (remoteVideoRef.current) remoteVideoRef.current.srcObject = null;
 
-      if (localVideoRef.current) {
-        localVideoRef.current.srcObject = null;
-      }
-
-      if (remoteVideoRef.current) {
-        remoteVideoRef.current.srcObject = null;
-      }
-
+      // Tutup peer
       if (peerConnectionRef.current) {
+        try { peerConnectionRef.current.getSenders().forEach(s => s.replaceTrack(null)); } catch {}
+        peerConnectionRef.current.ontrack = null;
+        peerConnectionRef.current.onicecandidate = null;
+        peerConnectionRef.current.onconnectionstatechange = null;
+        peerConnectionRef.current.oniceconnectionstatechange = null;
         peerConnectionRef.current.close();
         peerConnectionRef.current = null;
       }
 
+      // Tutup WS (opsional—kalau mau tetap tersambung, hapus bagian ini)
       if (websocketRef.current) {
-        websocketRef.current.close();
+        try { websocketRef.current.close(); } catch {}
         websocketRef.current = null;
       }
 
+      // Hentikan polling performance
       if (performanceIntervalRef.current) {
         clearInterval(performanceIntervalRef.current);
         performanceIntervalRef.current = null;
       }
-
-      setIsStreaming(false);
-      setConnectionStatus('disconnected');
+      
+      setConnectionStatus('disconnected'); // biar status jelas; startStream akan re-init
       setPerformanceData(null);
       addLog('Stream stopped');
-    } catch (error) {
-      console.error('Error stopping stream:', error);
+    } catch (err) {
+      console.error('Error stopping stream:', err);
       addLog('Error stopping stream');
+    } finally {
+      // ⬅️ ini yang memastikan tombol Start aktif lagi TANPA refresh
+      setIsStreaming(false);
     }
   };
 
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const handleMessage = async (message: any) => {
     if (!peerConnectionRef.current) return;
 
@@ -364,111 +407,122 @@ export default function StreamComponent({
   }
 
   return (
-    <div className="min-h-screen bg-slate-50 p-6">
-      <div className="max-w-7xl mx-auto space-y-6">
-        {/* Header */}
-        <div className="text-center">
-          <h1 className="text-3xl font-light text-slate-900 mb-2">
-            Carter Island Detection System
-          </h1>
-          <p className="text-slate-600">
-            Real-time object detection with GPU acceleration
-          </p>
-        </div>
+    <>
+      <Header
+        title="Live Stream"
+        subtitle="Real-time object detection with GPU acceleration"
+        emoji="🎥"
+      />
 
-        {/* Status Bar */}
-        <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-4">
-          <div className="flex flex-wrap items-center justify-between gap-4">
-            <div className="flex items-center gap-4">
-              <div className={`px-4 py-2 rounded-lg border text-sm font-medium flex items-center gap-2 ${getStatusColor(connectionStatus)}`}>
-                {getStatusIndicator(connectionStatus)}
-                Status: {connectionStatus === 'error' ? 'websocket error' : connectionStatus}
-              </div>
-              
-              {performanceData && (
-                <>
-                  <div className="px-3 py-2 bg-slate-50 rounded-lg border border-slate-200">
-                    <span className="text-slate-700 text-sm font-medium">
+      <main className="p-0 lg:px-4 mt-4 space-y-4">
+        {/* STATUS BAR */}
+        <Card className="border-0 shadow-sm">
+          <CardContent className="px-4">
+            <div className="flex flex-wrap items-center justify-between gap-4">
+              <div className="flex items-center gap-3">
+                <div
+                  className={`px-3 py-1.5 rounded-lg border text-xs font-medium flex items-center gap-2 ${getStatusColor(
+                    connectionStatus
+                  )}`}
+                >
+                  {getStatusIndicator(connectionStatus)}
+                  <span>
+                    Status:{' '}
+                    {connectionStatus === 'error'
+                      ? 'websocket error'
+                      : connectionStatus}
+                  </span>
+                </div>
+
+                {performanceData && (
+                  <>
+                    <div className="px-2.5 py-1.5 bg-slate-50 rounded-lg border border-slate-200 text-xs font-medium text-slate-700">
                       Device: {performanceData.device}
+                    </div>
+
+                    {performanceData.cuda_available && (
+                      <div className="px-2.5 py-1.5 bg-emerald-50 rounded-lg border border-emerald-200 text-xs font-medium text-emerald-700">
+                        CUDA Enabled
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
+
+              <div className="flex gap-2">
+                <Button
+                  variant="default"
+                  size="sm"
+                  onClick={() => window.location.reload()}
+                >
+                  Refresh
+                </Button>
+                <Button
+                  size="sm"
+                  className="bg-blue-600 hover:bg-blue-700 text-white disabled:opacity-50"
+                  onClick={startStream}
+                  disabled={isStreaming}
+                >
+                  {isStreaming ? 'Streaming…' : 'Start Stream'}
+                </Button>
+                <Button
+                  size="sm"
+                  variant="destructive"
+                  onClick={stopStream}
+                  disabled={!isStreaming}
+                >
+                  Stop Stream
+                </Button>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* MODEL INFO */}
+        {modelInfo?.model_loaded && (
+          <Card className="border-0 shadow-sm">
+            <CardContent className="px-4">
+              <div className="flex flex-wrap items-center justify-between gap-4">
+                <h3 className="text-lg font-medium text-slate-900">
+                  Model Information
+                </h3>
+                <div className="flex flex-wrap items-center gap-3">
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm text-slate-600">Status:</span>
+                    <span className="px-2 py-1 bg-emerald-50 text-emerald-700 rounded text-sm font-medium">
+                      Model Loaded
                     </span>
                   </div>
-                  
-                  {performanceData.cuda_available && (
-                    <div className="px-3 py-2 bg-emerald-50 rounded-lg border border-emerald-200">
-                      <span className="text-emerald-700 text-sm font-medium">CUDA Enabled</span>
-                    </div>
-                  )}
-                </>
-              )}
-            </div>
-            
-            <div className="flex gap-3">
-              <button
-                onClick={() => window.location.reload()}
-                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium transition-all duration-200 text-sm"
-              >
-                Refresh
-              </button>
-              <button
-                onClick={startStream}
-                disabled={isStreaming || connectionStatus !== 'connected'}
-                className="px-6 py-2 bg-slate-900 hover:bg-slate-800 disabled:bg-slate-400 text-white rounded-lg font-medium transition-all duration-200 text-sm"
-              >
-                {isStreaming ? 'Streaming...' : 'Start Stream'}
-              </button>
-              <button
-                onClick={stopStream}
-                disabled={!isStreaming}
-                className="px-6 py-2 bg-red-600 hover:bg-red-700 disabled:bg-slate-400 text-white rounded-lg font-medium transition-all duration-200 text-sm"
-              >
-                Stop Stream
-              </button>
-            </div>
-          </div>
-        </div>
-
-        {/* Model Information - Compact Single Row */}
-        {modelInfo && modelInfo.model_loaded && (
-          <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-4">
-            <div className="flex flex-wrap items-center justify-between gap-4">
-              <h3 className="text-lg font-medium text-slate-900">
-                Model Information
-              </h3>
-              <div className="flex flex-wrap items-center gap-4">
-                <div className="flex items-center gap-2">
-                  <span className="text-sm text-slate-600">Status:</span>
-                  <span className="px-2 py-1 bg-emerald-50 text-emerald-700 rounded text-sm font-medium">
-                    Model Loaded
-                  </span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <span className="text-sm text-slate-600">Device:</span>
-                  <span className="px-2 py-1 bg-slate-50 text-slate-700 rounded text-sm font-medium">
-                    {modelInfo.device || 'Unknown'}
-                  </span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <span className="text-sm text-slate-600">Classes:</span>
-                  <span className="px-2 py-1 bg-slate-50 text-slate-700 rounded text-sm font-medium">
-                    {modelInfo.num_classes || 0} classes
-                  </span>
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm text-slate-600">Device:</span>
+                    <span className="px-2 py-1 bg-slate-50 text-slate-700 rounded text-sm font-medium">
+                      {modelInfo.device || 'Unknown'}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm text-slate-600">Classes:</span>
+                    <span className="px-2 py-1 bg-slate-50 text-slate-700 rounded text-sm font-medium">
+                      {modelInfo.num_classes || 0} classes
+                    </span>
+                  </div>
                 </div>
               </div>
-            </div>
-          </div>
+            </CardContent>
+          </Card>
         )}
 
-        {/* Video Grid - 2 Videos Only */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {/* Local Video */}
-          <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+        {/* VIDEO GRID */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          {/* Local */}
+          <Card className="border-0 shadow-sm">
             <div className="border-b border-slate-200 px-4 py-3">
-              <h3 className="text-md font-medium text-slate-900">
-                Live Camera
-              </h3>
+              <h3 className="text-md font-medium text-slate-900">Live Camera</h3>
             </div>
-            <div className="p-4">
-              <div className="relative bg-slate-900 rounded-lg overflow-hidden" style={{ aspectRatio: '16/9' }}>
+            <CardContent className="px-4">
+              <div
+                className="relative bg-slate-900 rounded-lg overflow-hidden"
+                style={{ aspectRatio: '16/9' }}
+              >
                 <video
                   ref={localVideoRef}
                   autoPlay
@@ -485,18 +539,21 @@ export default function StreamComponent({
                   </div>
                 )}
               </div>
-            </div>
-          </div>
+            </CardContent>
+          </Card>
 
-          {/* YOLO Detection Video */}
-          <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+          {/* YOLO */}
+          <Card className="border-0 shadow-sm">
             <div className="border-b border-slate-200 px-4 py-3">
               <h3 className="text-md font-medium text-slate-900">
                 YOLO Detection
               </h3>
             </div>
-            <div className="p-4">
-              <div className="relative bg-slate-900 rounded-lg overflow-hidden" style={{ aspectRatio: '16/9' }}>
+            <CardContent className="px-4">
+              <div
+                className="relative bg-slate-900 rounded-lg overflow-hidden"
+                style={{ aspectRatio: '16/9' }}
+              >
                 <video
                   ref={remoteVideoRef}
                   autoPlay
@@ -517,82 +574,84 @@ export default function StreamComponent({
                   </div>
                 )}
               </div>
-            </div>
-          </div>
+            </CardContent>
+          </Card>
         </div>
 
-        {/* System Logs */}
-        <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+        {/* LOGS */}
+        <Card className="border-0 shadow-sm">
           <div className="border-b border-slate-200 px-4 py-3">
-            <h3 className="text-md font-medium text-slate-900">
-              System Logs
-            </h3>
+            <h3 className="text-md font-medium text-slate-900">System Logs</h3>
           </div>
-          <div className="p-4">
+          <CardContent className="px-4">
             <div className="bg-slate-900 rounded-lg p-4 h-40 overflow-y-auto">
               <div className="space-y-1 text-sm font-mono">
-                {logs.length > 0 ? logs.map((log, index) => (
-                  <div key={index} className="text-emerald-400">
-                    {log}
-                  </div>
-                )) : (
+                {logs.length > 0 ? (
+                  logs.map((log, i) => (
+                    <div key={i} className="text-emerald-400">
+                      {log}
+                    </div>
+                  ))
+                ) : (
                   <div className="text-slate-500">No logs available</div>
                 )}
               </div>
             </div>
-          </div>
-        </div>
+          </CardContent>
+        </Card>
 
-        {/* Performance Dashboard - Moved Below Logs */}
+        {/* PERFORMANCE */}
         {performanceData && isStreaming && (
-          <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
-            <h3 className="text-lg font-medium text-slate-900 mb-4">
-              Performance Monitor
-            </h3>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-              <div className="text-center p-4 bg-slate-50 rounded-lg">
-                <p className={`text-3xl font-light ${getFpsColor(performanceData.fps)}`}>
-                  {performanceData.fps.toFixed(1)}
-                </p>
-                <p className="text-sm text-slate-600 mt-1">Render FPS</p>
+          <Card>
+            <CardContent className="p-6">
+              <h3 className="text-lg font-medium text-slate-900 mb-4">
+                Performance Monitor
+              </h3>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <div className="text-center p-4 bg-slate-50 rounded-lg">
+                  <p className={`text-3xl font-light ${getFpsColor(performanceData.fps)}`}>
+                    {performanceData.fps.toFixed(1)}
+                  </p>
+                  <p className="text-sm text-slate-600 mt-1">Render FPS</p>
+                </div>
+                <div className="text-center p-4 bg-slate-50 rounded-lg">
+                  <p className={`text-3xl font-light ${getFpsColor(performanceData.inference_fps)}`}>
+                    {performanceData.inference_fps.toFixed(1)}
+                  </p>
+                  <p className="text-sm text-slate-600 mt-1">Inference FPS</p>
+                </div>
+                <div className="text-center p-4 bg-slate-50 rounded-lg">
+                  <p className="text-3xl font-light text-slate-700">
+                    {performanceData.active_connections}
+                  </p>
+                  <p className="text-sm text-slate-600 mt-1">Connections</p>
+                </div>
+                <div className="text-center p-4 bg-slate-50 rounded-lg">
+                  <p className="text-3xl font-light text-slate-700">
+                    {performanceData.model_loaded ? 'Active' : 'Inactive'}
+                  </p>
+                  <p className="text-sm text-slate-600 mt-1">Model Status</p>
+                </div>
               </div>
-              <div className="text-center p-4 bg-slate-50 rounded-lg">
-                <p className={`text-3xl font-light ${getFpsColor(performanceData.inference_fps)}`}>
-                  {performanceData.inference_fps.toFixed(1)}
-                </p>
-                <p className="text-sm text-slate-600 mt-1">Inference FPS</p>
-              </div>
-              <div className="text-center p-4 bg-slate-50 rounded-lg">
-                <p className="text-3xl font-light text-slate-700">
-                  {performanceData.active_connections}
-                </p>
-                <p className="text-sm text-slate-600 mt-1">Connections</p>
-              </div>
-              <div className="text-center p-4 bg-slate-50 rounded-lg">
-                <p className="text-3xl font-light text-slate-700">
-                  {performanceData.model_loaded ? 'Active' : 'Inactive'}
-                </p>
-                <p className="text-sm text-slate-600 mt-1">Model Status</p>
-              </div>
-            </div>
-          </div>
+            </CardContent>
+          </Card>
         )}
 
-        {/* Troubleshooting Only */}
-        <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
-          <h3 className="text-lg font-medium text-slate-900 mb-4">
-            Troubleshooting
-          </h3>
-          <div className="text-sm text-slate-600">
-            <ul className="list-disc list-inside space-y-2">
+        {/* TROUBLESHOOTING */}
+        <Card className="border-0 shadow-sm">
+          <CardContent className="px-4">
+            <h3 className="text-lg font-medium text-slate-900 mb-4">
+              Troubleshooting
+            </h3>
+            <ul className="list-disc list-inside text-sm text-slate-600 space-y-2">
               <li>Check CUDA installation for GPU support</li>
               <li>Verify backend health at localhost:8000</li>
               <li>Monitor system logs for errors</li>
               <li>Restart if FPS drops significantly</li>
             </ul>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
+          </CardContent>
+        </Card>
+      </main>
+    </>
+  )
 }
