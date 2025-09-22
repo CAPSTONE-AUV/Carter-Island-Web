@@ -2,12 +2,17 @@ import asyncio
 import json
 import logging
 import os
+import shutil
 from ultralytics import YOLO
 from typing import Dict, Set
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request
 from fastapi.middleware.cors import CORSMiddleware
 from aiortc import RTCPeerConnection, RTCSessionDescription, VideoStreamTrack
+from pathlib import Path
+from datetime import datetime
+from fastapi import UploadFile, File, HTTPException
+from fastapi.responses import FileResponse, StreamingResponse, Response
 import cv2
 import numpy as np
 import uvicorn
@@ -16,6 +21,7 @@ import torch
 from threading import Lock
 from concurrent.futures import ThreadPoolExecutor
 import queue
+import re
 
 
 # Setup logging
@@ -28,6 +34,9 @@ active_connections: Set[WebSocket] = set()
 custom_model = None
 inference_executor = ThreadPoolExecutor(max_workers=2)
 inference_queue = queue.Queue(maxsize=3)
+
+RECORDINGS_DIR = Path("recordings")
+RECORDINGS_DIR.mkdir(exist_ok=True)
 
 # Performance counters
 frame_count = 0
@@ -653,6 +662,127 @@ async def get_model_info():
         return info
     
     return {"model_loaded": False}
+
+@app.post("/api/recordings")
+async def upload_recording(file: UploadFile = File(...)):
+    """Upload recording file"""
+    try:
+        # Validate file type
+        if not file.content_type or not file.content_type.startswith('video/'):
+            raise HTTPException(status_code=400, detail="File must be a video")
+        
+        # Generate unique filename
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"recording_{timestamp}_{file.filename}"
+        filepath = RECORDINGS_DIR / filename
+        
+        # Save file
+        with open(filepath, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+        
+        # Get file info
+        file_size = filepath.stat().st_size
+        
+        return {
+            "filename": filename,
+            "size": file_size,
+            "message": "Recording uploaded successfully"
+        }
+        
+    except Exception as e:
+        logger.error(f"Error uploading recording: {e}")
+        raise HTTPException(status_code=500, detail="Failed to upload recording")
+
+@app.get("/api/recordings")
+async def list_recordings():
+    """Get list of all recordings"""
+    try:
+        recordings = []
+        
+        for file_path in RECORDINGS_DIR.glob("*.webm"):
+            stat = file_path.stat()
+            recordings.append({
+                "filename": file_path.name,
+                "size": stat.st_size,
+                "size_mb": round(stat.st_size / (1024 * 1024), 2),
+                "created_at": datetime.fromtimestamp(stat.st_ctime).isoformat(),
+                "modified_at": datetime.fromtimestamp(stat.st_mtime).isoformat()
+            })
+        
+        # Sort by created time (newest first)
+        recordings.sort(key=lambda x: x["created_at"], reverse=True)
+        
+        return {"recordings": recordings}
+        
+    except Exception as e:
+        logger.error(f"Error listing recordings: {e}")
+        raise HTTPException(status_code=500, detail="Failed to list recordings")
+
+@app.get("/api/recordings/{filename}")
+async def get_recording(filename: str, request: Request):
+    """Serve recording file for streaming/download with proper headers"""
+    file_path = RECORDINGS_DIR / filename
+    
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail="Recording not found")
+    
+    # Get file info
+    file_size = file_path.stat().st_size
+    
+    # Handle range requests for video streaming
+    range_header = request.headers.get('range')
+    
+    if range_header:
+        # Parse range header
+        range_match = re.search(r'bytes=(\d+)-(\d*)', range_header)
+        if range_match:
+            start = int(range_match.group(1))
+            end = int(range_match.group(2)) if range_match.group(2) else file_size - 1
+            
+            # Read chunk
+            with open(file_path, 'rb') as f:
+                f.seek(start)
+                chunk_size = end - start + 1
+                chunk = f.read(chunk_size)
+            
+            return Response(
+                chunk,
+                status_code=206,  # Partial Content
+                headers={
+                    'Content-Range': f'bytes {start}-{end}/{file_size}',
+                    'Accept-Ranges': 'bytes',
+                    'Content-Length': str(chunk_size),
+                    'Content-Type': 'video/webm',
+                },
+            )
+    
+    # Full file response (untuk download)
+    return FileResponse(
+        file_path,
+        media_type="video/webm",
+        filename=filename,
+        headers={
+            'Accept-Ranges': 'bytes',
+            'Content-Length': str(file_size),
+        }
+    )
+
+@app.delete("/api/recordings/{filename}")
+async def delete_recording(filename: str):
+    """Delete recording file"""
+    try:
+        file_path = RECORDINGS_DIR / filename
+        
+        if not file_path.exists():
+            raise HTTPException(status_code=404, detail="Recording not found")
+        
+        file_path.unlink()
+        
+        return {"message": f"Recording {filename} deleted successfully"}
+        
+    except Exception as e:
+        logger.error(f"Error deleting recording: {e}")
+        raise HTTPException(status_code=500, detail="Failed to delete recording")
 
 if __name__ == "__main__":
     uvicorn.run(

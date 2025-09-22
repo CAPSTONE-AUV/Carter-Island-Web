@@ -4,6 +4,7 @@ import { useEffect, useRef, useState, useCallback } from 'react';
 import Header from '@/components/layout/Header';
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
+import RecordingControls from '@/components/RecordingControls'
 
 interface StreamComponentProps {
   apiUrl?: string;
@@ -43,6 +44,7 @@ export default function StreamComponent({
   const peerConnectionRef = useRef<RTCPeerConnection | null>(null);
   const localStreamRef = useRef<MediaStream | null>(null);
   const performanceIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const originalStreamRef = useRef<MediaStream | null>(null)
 
   // Initialize client-only code
   useEffect(() => {
@@ -196,6 +198,7 @@ export default function StreamComponent({
         addLog('Received remote video track');
         if (remoteVideoRef.current && event.streams[0]) {
           remoteVideoRef.current.srcObject = event.streams[0];
+          originalStreamRef.current = event.streams[0];
         }
       };
 
@@ -473,6 +476,15 @@ export default function StreamComponent({
                 >
                   Stop Stream
                 </Button>
+                <RecordingControls 
+                  isStreaming={isStreaming}
+                  videoElement={remoteVideoRef.current}
+                  originalStream={originalStreamRef.current}
+                  onUploadComplete={(filename) => {
+                    console.log('Recording uploaded:', filename)
+                    console.log('Current originalStream:', originalStreamRef.current)
+                  }}
+                />
               </div>
             </div>
           </CardContent>
