@@ -1,663 +1,538 @@
-import asyncio
-import json
-import logging
+# main.py
 import os
-from ultralytics import YOLO
-from typing import Dict, Set
+import re
+import cv2
+import time
+import json
+import torch
+import asyncio
+import logging
+import numpy as np
+from typing import Dict, Set, Optional, Callable
 from contextlib import asynccontextmanager
+from concurrent.futures import ThreadPoolExecutor
+
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+
 from aiortc import RTCPeerConnection, RTCSessionDescription, VideoStreamTrack
-import cv2
-import numpy as np
-import uvicorn
-import time
-import torch
-from threading import Lock
-from concurrent.futures import ThreadPoolExecutor
-import queue
+from aiortc.contrib.media import MediaPlayer
+from av import VideoFrame
 
-
-# Setup logging
+# ==========================
+# Config & Logging
+# ==========================
 logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("carter-backend")
 
-# Global variables
+# ---- Streaming / encoder prefs (bisa override via ENV) ----
+RTSP_URL = os.getenv("RTSP_URL", "rtsp://192.168.2.2:8554/cam")
+RTSP_TRANSPORT = os.getenv("RTSP_TRANSPORT", "udp")
+TARGET_FPS = int(os.getenv("TARGET_FPS", "30"))
+RESIZE_WIDTH = int(os.getenv("RESIZE_WIDTH", "1280"))
+RESIZE_HEIGHT = int(os.getenv("RESIZE_HEIGHT", "720"))
+
+# Bitrate control
+MAX_BITRATE_KBPS_DEFAULT = int(os.getenv("MAX_BITRATE_KBPS", "4500"))
+MIN_BITRATE_KBPS_FLOOR   = int(os.getenv("MIN_BITRATE_KBPS", "2500"))
+BITRATE_REAPPLY_SEC      = float(os.getenv("BITRATE_REAPPLY_SEC", "4.0"))
+# Codec preference ("h264" / "vp8")
+PREFER_CODEC = os.getenv("PREFER_CODEC", "h264").lower()
+
+DISABLE_TWCC_REM = os.getenv("DISABLE_TWCC_REMB", "1") == "1"
+
+# ==========================
+# Globals & Performance
+# ==========================
 peer_connections: Dict[str, RTCPeerConnection] = {}
 active_connections: Set[WebSocket] = set()
-custom_model = None
-inference_executor = ThreadPoolExecutor(max_workers=2)
-inference_queue = queue.Queue(maxsize=3)
+bitrate_tasks: Dict[str, asyncio.Task] = {}
 
-# Performance counters
+custom_model = None
+device_info = "CPU"
+inference_executor = ThreadPoolExecutor(max_workers=2)
+
+# Perf counters
 frame_count = 0
 inference_count = 0
 last_fps_time = time.time()
-last_inference_time = time.time()
+last_infer_time = time.time()
 current_fps = 0.0
-current_inference_fps = 0.0
-device_info = "CPU"
+current_infer_fps = 0.0
 
-class CustomModelVideoStreamTrack(VideoStreamTrack):
-    """Video stream track with custom model processing"""
-    def __init__(self, track):
-        super().__init__()
-        self.track = track
-        self.frame_skip_counter = 0
-        self.skip_frames = 1  # Process every 2nd frame
-        self.last_detections = []
-        self.inference_size = 640
-        self.confidence_threshold = 0.45
-        self.iou_threshold = 0.5
-        self.max_detections = 25
-        
-    def preprocess_frame(self, img):
-        """Preprocess frame for custom model inference"""
-        original_height, original_width = img.shape[:2]
-        
-        # Calculate scale to maintain aspect ratio
-        scale = min(self.inference_size / original_width, self.inference_size / original_height)
-        new_width = int(original_width * scale)
-        new_height = int(original_height * scale)
-        
-        # Resize image
-        resized_img = cv2.resize(img, (new_width, new_height))
-        
-        # Pad to square if needed
-        pad_x = (self.inference_size - new_width) // 2
-        pad_y = (self.inference_size - new_height) // 2
-        
-        padded_img = cv2.copyMakeBorder(
-            resized_img, pad_y, pad_y, pad_x, pad_x, 
-            cv2.BORDER_CONSTANT, value=(114, 114, 114)
-        )
-        
-        return padded_img, scale, pad_x, pad_y
-    
-    def run_inference(self, processed_img, original_shape):
-        """Run custom model inference - compatible with YOLOv8/YOLOv5 format"""
-        try:
-            if custom_model is None:
-                logger.warning("Custom model not loaded yet, skipping inference")
-                return []
-            
-            with torch.no_grad():
-                # Check if this is a YOLO-based model
-                if hasattr(custom_model, 'predict') or hasattr(custom_model, '__call__'):
-                    # For YOLO models from Ultralytics
-                    results = custom_model(
-                        processed_img,
-                        verbose=False,
-                        conf=self.confidence_threshold,
-                        iou=self.iou_threshold,
-                        max_det=self.max_detections,
-                        device='cuda' if torch.cuda.is_available() else 'cpu',
-                        half=True if torch.cuda.is_available() else False,
-                        augment=False,
-                        visualize=False
-                    )
-                    
-                    # Process YOLO results
-                    detections = []
-                    original_height, original_width = original_shape[:2]
-                    
-                    for r in results:
-                        boxes = r.boxes
-                        if boxes is not None:
-                            for box in boxes:
-                                # Get coordinates and scale back
-                                x1, y1, x2, y2 = box.xyxy[0].cpu().numpy()
-                                
-                                # Remove padding and scale back to original size
-                                x1 = max(0, (x1 - self.inference_size//8) * (original_width / (self.inference_size * 0.75)))
-                                y1 = max(0, (y1 - self.inference_size//8) * (original_height / (self.inference_size * 0.75)))
-                                x2 = min(original_width, (x2 - self.inference_size//8) * (original_width / (self.inference_size * 0.75)))
-                                y2 = min(original_height, (y2 - self.inference_size//8) * (original_height / (self.inference_size * 0.75)))
-                                
-                                conf = float(box.conf[0].cpu().numpy())
-                                cls = int(box.cls[0].cpu().numpy())
-                                
-                                # Get class name if available
-                                class_name = f"Class_{cls}"
-                                if hasattr(custom_model, 'names') and cls < len(custom_model.names):
-                                    class_name = custom_model.names[cls]
-                                
-                                if conf > self.confidence_threshold:
-                                    detections.append({
-                                        'bbox': (int(x1), int(y1), int(x2), int(y2)),
-                                        'conf': conf,
-                                        'cls': cls,
-                                        'class_name': class_name
-                                    })
-                else:
-                    # For other PyTorch models
-                    img_tensor = torch.from_numpy(processed_img).float()
-                    if len(img_tensor.shape) == 3:
-                        img_tensor = img_tensor.permute(2, 0, 1)
-                        img_tensor = img_tensor.unsqueeze(0)
-                    
-                    img_tensor = img_tensor / 255.0
-                    
-                    if torch.cuda.is_available():
-                        img_tensor = img_tensor.cuda()
-                    
-                    outputs = custom_model(img_tensor)
-                    detections = self.process_model_outputs(outputs, original_shape)
-                
-                # Update inference counter
-                global inference_count, last_inference_time, current_inference_fps
-                inference_count += 1
-                current_time = time.time()
-                if current_time - last_inference_time >= 1.0:
-                    current_inference_fps = inference_count / (current_time - last_inference_time)
-                    inference_count = 0
-                    last_inference_time = current_time
-                
-                return detections
-                
-        except Exception as e:
-            logger.error(f"Inference error: {e}")
-            return []
-    
-    def process_model_outputs(self, outputs, original_shape):
-        """Process custom model outputs for non-YOLO models"""
-        detections = []
-        original_height, original_width = original_shape[:2]
-        
-        try:
-            if hasattr(outputs, 'detach'):
-                outputs = outputs.detach().cpu().numpy()
-            
-        except Exception as e:
-            logger.error(f"Error processing model outputs: {e}")
-        
-        return detections
-    
-    async def recv(self):
-        frame = await self.track.recv()
-        img = frame.to_ndarray(format="bgr24")
-        original_shape = img.shape
-        
-        # Frame skipping for optimal performance
-        self.frame_skip_counter += 1
-        should_inference = self.frame_skip_counter % (self.skip_frames + 1) == 0
-        
-        if custom_model is not None and should_inference:
-            try:
-                processed_img, scale, pad_x, pad_y = self.preprocess_frame(img)
-                
-                if not inference_queue.full():
-                    future = inference_executor.submit(self.run_inference, processed_img, original_shape)
-                    try:
-                        detections = future.result(timeout=0.05)
-                        self.last_detections = detections
-                    except:
-                        pass
-                        
-            except Exception as e:
-                logger.error(f"Frame processing error: {e}")
-        
-        # Draw detections
-        self.draw_detections(img)
-        
-        # Calculate and draw FPS
-        self.update_and_draw_fps(img)
-        
-        # Convert back to frame
-        new_frame = frame.from_ndarray(img, format="bgr24")
-        new_frame.pts = frame.pts
-        new_frame.time_base = frame.time_base
-        
-        return new_frame
-    
-    def draw_detections(self, img):
-        """Draw bounding boxes and labels"""
-        for detection in self.last_detections:
-            try:
-                x1, y1, x2, y2 = detection['bbox']
-                conf = detection['conf']
-                cls = detection['cls']
-                class_name = detection.get('class_name', f'Class_{cls}')
-                
-                # Ensure coordinates are within bounds
-                height, width = img.shape[:2]
-                x1 = max(0, min(x1, width - 1))
-                y1 = max(0, min(y1, height - 1))
-                x2 = max(0, min(x2, width - 1))
-                y2 = max(0, min(y2, height - 1))
-                
-                if x2 > x1 and y2 > y1:  # Valid box
-                    # Get color for class
-                    color = self.get_class_color(cls)
-                    
-                    # Draw thick bounding box
-                    cv2.rectangle(img, (x1, y1), (x2, y2), color, 3)
-                    
-                    # Prepare label
-                    label = f"{class_name}: {conf:.2f}"
-                    
-                    # Calculate text size
-                    font_scale = 0.7
-                    thickness = 2
-                    (text_width, text_height), baseline = cv2.getTextSize(
-                        label, cv2.FONT_HERSHEY_SIMPLEX, font_scale, thickness
-                    )
-                    
-                    # Draw label background
-                    cv2.rectangle(
-                        img, 
-                        (x1, y1 - text_height - baseline - 10), 
-                        (x1 + text_width, y1), 
-                        color, -1
-                    )
-                    
-                    # Draw label text
-                    cv2.putText(
-                        img, label, (x1, y1 - baseline - 5),
-                        cv2.FONT_HERSHEY_SIMPLEX, font_scale, (255, 255, 255), thickness
-                    )
-                    
-            except Exception as e:
-                logger.error(f"Drawing error: {e}")
-                continue
-    
-    def get_class_color(self, class_id):
-        """Generate consistent color for each class"""
-        colors = [
-            (0, 255, 0),    # Green
-            (255, 0, 0),    # Blue  
-            (0, 0, 255),    # Red
-            (255, 255, 0),  # Cyan
-            (255, 0, 255),  # Magenta
-            (0, 255, 255),  # Yellow
-            (128, 0, 128),  # Purple
-            (255, 165, 0),  # Orange
-            (0, 128, 255),  # Light Blue
-            (128, 255, 0),  # Light Green
-        ]
-        return colors[class_id % len(colors)]
-    
-    def update_and_draw_fps(self, img):
-        """Update and draw FPS counter"""
-        global frame_count, last_fps_time, current_fps
-        
-        frame_count += 1
-        current_time = time.time()
-        if current_time - last_fps_time >= 1.0:
-            current_fps = frame_count / (current_time - last_fps_time)
-            frame_count = 0
-            last_fps_time = current_time
-        
-        # Draw FPS counter
-        fps_text = f"FPS: {current_fps:.1f}"
-        inference_text = f"Inference: {current_inference_fps:.1f}"
-        device_text = f"Device: {device_info}"
-        
-        # FPS
-        cv2.putText(img, fps_text, (10, 30), 
-                   cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2, cv2.LINE_AA)
-        
-        # Inference FPS
-        cv2.putText(img, inference_text, (10, 70), 
-                   cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 0), 2, cv2.LINE_AA)
-        
-        # Device info
-        cv2.putText(img, device_text, (10, 110), 
-                   cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 0, 255), 2, cv2.LINE_AA)
-        
-        # Detection count
-        if self.last_detections:
-            detection_text = f"Objects: {len(self.last_detections)}"
-            cv2.putText(img, detection_text, (10, 150), 
-                       cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 255), 2, cv2.LINE_AA)
-
+# ==========================
+# Model Loader (Ultralytics YOLO)
+# ==========================
 def load_custom_model():
-    """Load your custom model from the models folder"""
     global custom_model, device_info
-    
     try:
-        # Check CUDA availability
-        cuda_available = torch.cuda.is_available()
-        if cuda_available:
+        cuda = torch.cuda.is_available()
+        if cuda:
             cuda_ver = getattr(getattr(torch, "version", None), "cuda", None)
             device_info = f"CUDA {cuda_ver or 'unknown'} - {torch.cuda.get_device_name(0)}"
-            logger.info(f"CUDA available: {device_info}")
-            
-            # Set CUDA optimizations
             torch.backends.cudnn.benchmark = True
             torch.backends.cudnn.deterministic = False
-            
-            # Clear cache
             torch.cuda.empty_cache()
         else:
             device_info = "CPU"
-            logger.warning("CUDA not available, using CPU")
-        
-        # Load the 16sept.pt model
-        models_path = os.path.join(os.path.dirname(__file__), "models")
-        model_path = os.path.join(models_path, "16sept.pt")
-        
-        if os.path.exists(model_path):
-            logger.info(f"Loading custom model from: {model_path}")
-            
-            # Try to load as Ultralytics YOLO model first
-            try:
-                custom_model = YOLO(model_path)
-                
-                if cuda_available:
-                    custom_model.to('cuda')
-                
-                logger.info(f"Model loaded successfully as YOLO model")
-                logger.info(f"Model has {len(custom_model.names)} classes: {list(custom_model.names.values())[:10]}...")
-                
-            except ImportError:
-                logger.warning("Ultralytics not installed, trying to load as PyTorch model")
-                # Fall back to standard PyTorch loading
-                custom_model = torch.load(model_path, map_location='cuda' if cuda_available else 'cpu')
-                
-                if hasattr(custom_model, 'eval'):
-                    custom_model.eval()
-                
-                if cuda_available and hasattr(custom_model, 'cuda'):
-                    custom_model = custom_model.cuda()
-                
-                logger.info("Model loaded as PyTorch model")
-            
-            # Warmup model
-            logger.info("Warming up model...")
-            dummy_img = np.random.randint(0, 255, (640, 640, 3), dtype=np.uint8)
-            
-            # Multiple warmup runs for optimal performance
-            for i in range(3):
-                with torch.no_grad():
-                    try:
-                        if hasattr(custom_model, 'predict') or hasattr(custom_model, '__call__'):
-                            _ = custom_model(dummy_img, verbose=False, device='cuda' if cuda_available else 'cpu')
-                        else:
-                            dummy_tensor = torch.from_numpy(dummy_img).float().permute(2, 0, 1).unsqueeze(0)
-                            if cuda_available:
-                                dummy_tensor = dummy_tensor.cuda()
-                            _ = custom_model(dummy_tensor / 255.0)
-                    except Exception as e:
-                        logger.warning(f"Warmup iteration {i} failed: {e}")
-            
-            if cuda_available:
-                torch.cuda.synchronize()
-                
-            logger.info("Model warmed up successfully")
-        else:
-            logger.error(f"Model file not found at {model_path}")
-            logger.info(f"Looking for model files in: {models_path}")
-            if os.path.exists(models_path):
-                files = os.listdir(models_path)
-                logger.info(f"Files in models directory: {files}")
-            
+
+        model_path = os.path.join(os.path.dirname(__file__), "models", "16sept.pt")
+        if not os.path.exists(model_path):
+            logger.warning(f"Model not found at {model_path}, running passthrough (no detection).")
+            custom_model = None
+            return
+
+        from ultralytics import YOLO
+        custom_model = YOLO(model_path)
+        if cuda:
+            custom_model.to('cuda')
+
+        # warmup
+        dummy = np.random.randint(0, 255, (640, 640, 3), dtype=np.uint8)
+        for _ in range(2):
+            _ = custom_model(dummy, verbose=False, device='cuda' if cuda else 'cpu')
+        if cuda:
+            torch.cuda.synchronize()
+        logger.info("YOLO model loaded & warmed up.")
     except Exception as e:
-        logger.error(f"Failed to load custom model: {e}")
-        import traceback
-        logger.error(traceback.format_exc())
+        logger.exception(f"Failed to load model: {e}")
+        custom_model = None
         device_info = "Error"
 
-# Cleanup function for peer connections
-async def cleanup_peer_connection(client_id: str):
-    """Clean up peer connection properly"""
-    if client_id in peer_connections:
-        try:
-            pc = peer_connections[client_id]
-            # Close all transceivers
-            for transceiver in pc.getTransceivers():
-                if transceiver.receiver.track:
-                    transceiver.receiver.track.stop()
-                if transceiver.sender.track:
-                    transceiver.sender.track.stop()
-            
-            # Close peer connection
-            await pc.close()
-            logger.info(f"Peer connection for {client_id} closed properly")
-        except Exception as e:
-            logger.error(f"Error closing peer connection for {client_id}: {e}")
-        finally:
-            # Remove from dictionary
-            peer_connections.pop(client_id, None)
-            logger.info(f"Peer connection for {client_id} removed from registry")
+# ==========================
+# Bitrate helpers (aiortc + SDP munging)
+# ==========================
+def _insert_bitrate_and_xgoogle(sdp: str, kbps: int, fps: int) -> str:
 
-# Lifespan context manager for startup and shutdown
+    lines = sdp.splitlines()
+    out = []
+    in_video = False
+    inserted_b = False
+
+    min_kb = max(300, min(kbps, max(MIN_BITRATE_KBPS_FLOOR, kbps // 4)))
+    for line in lines:
+        out.append(line)
+
+        if line.startswith("m=video"):
+            in_video = True
+            inserted_b = False
+            continue
+
+        if in_video and line.startswith("c=") and not inserted_b:
+            out.append(f"b=AS:{kbps}")
+            inserted_b = True
+
+        if in_video and line.startswith("a=fmtp:"):
+            if "x-google-max-bitrate" not in line:
+                out[-1] = (
+                    line
+                    + f";x-google-start-bitrate={kbps}"
+                    + f";x-google-max-bitrate={kbps}"
+                    + f";x-google-min-bitrate={min_kb}"
+                    + f";max-fs=8160;max-fr={fps}"
+                )
+
+        if in_video and line.startswith("m=") and not line.startswith("m=video"):
+            in_video = False
+
+    return "\r\n".join(out) + "\r\n"
+
+def _prefer_codec(sdp: str, codec: str = "H264") -> str:
+    codec = codec.upper()
+    lines = sdp.splitlines()
+    try:
+        # mapping payload by codec
+        pt_by_codec = {}
+        for l in lines:
+            if l.startswith("a=rtpmap:"):
+                parts = l.split()
+                pt = parts[0].split(":")[1]
+                name = parts[1].split("/")[0].upper()
+                pt_by_codec.setdefault(name, []).append(pt)
+
+        m_idx = next(i for i, l in enumerate(lines) if l.startswith("m=video"))
+        parts = lines[m_idx].split()
+        header, pts = parts[:3], parts[3:]
+        preferred = pt_by_codec.get(codec, [])
+        if not preferred:
+            return sdp
+        new_pts = [pt for pt in preferred if pt in pts] + [pt for pt in pts if pt not in preferred]
+        lines[m_idx] = " ".join(header + new_pts)
+        return "\r\n".join(lines) + "\r\n"
+    except Exception:
+        return sdp
+
+def _strip_twcc_and_remb(sdp: str) -> str:
+
+    lines = sdp.splitlines()
+    out = []
+    for l in lines:
+        if l.startswith("a=rtcp-fb:") and ("transport-cc" in l or "goog-remb" in l):
+            continue
+        if l.startswith("a=extmap:") and "transport-cc" in l:
+            continue
+        out.append(l)
+    return "\r\n".join(out) + "\r\n"
+
+async def set_sender_bitrate(sender, max_bitrate_bps: int, max_fps: int = 30) -> Optional[Callable[[str], str]]:
+   
+    try:
+        get_params = getattr(sender, "getParameters", None)
+        set_params = getattr(sender, "setParameters", None)
+        if callable(get_params) and callable(set_params):
+            params = get_params()
+            if not getattr(params, "encodings", None):
+                params.encodings = [{}] # type: ignore
+            enc = params.encodings[0] # type: ignore
+            enc["maxBitrate"] = int(max_bitrate_bps)
+            enc["maxFramerate"] = int(max_fps)
+            await set_params(params) # type: ignore
+            return None
+        
+        return lambda sdp: _insert_bitrate_and_xgoogle(sdp, max_bitrate_bps // 1000, max_fps)
+    except Exception as e:
+        logger.warning(f"set_sender_bitrate fallback: {e}")
+        return lambda sdp: _insert_bitrate_and_xgoogle(sdp, max_bitrate_bps // 1000, max_fps)
+
+async def periodic_reapply_bitrate(client_id: str, sender, bps: int, fps: int):
+
+    try:
+        while client_id in peer_connections:
+            await set_sender_bitrate(sender, bps, fps)
+            await asyncio.sleep(BITRATE_REAPPLY_SEC)
+    except asyncio.CancelledError:
+        pass
+    except Exception as e:
+        logger.warning(f"bitrate reapply err: {e}")
+
+def tune_answer_sdp(raw_sdp: str, kbps: int, fps: int, prefer: str, disable_twcc: bool) -> str:
+    sdp = raw_sdp
+    # Force codec
+    if prefer == "h264":
+        sdp = _prefer_codec(sdp, "H264")
+    elif prefer == "vp8":
+        sdp = _prefer_codec(sdp, "VP8")
+
+    sdp = _insert_bitrate_and_xgoogle(sdp, kbps, fps)
+
+    if disable_twcc:
+        sdp = _strip_twcc_and_remb(sdp)
+
+    return sdp
+
+# ==========================
+# RTSP Player & Detection Track
+# ==========================
+def make_rtsp_player(transport: str) -> MediaPlayer:
+
+    opts = {
+        "rtsp_transport": transport,
+        "fflags": "nobuffer",
+        "flags": "low_delay",
+        "max_delay": "0",
+        "reorder_queue_size": "0",
+        "probesize": "32",
+        "analyzeduration": "0",
+        "rw_timeout": "2000000",
+        "stimeout": "2000000",
+        "fflags+": "flush_packets",
+    }
+    logger.info(f"Opening RTSP: {RTSP_URL} (transport={transport})")
+    return MediaPlayer(RTSP_URL, format="rtsp", options=opts)
+
+class RtspDetectionTrack(VideoStreamTrack):
+    def __init__(self, video_source_track):
+        super().__init__()
+        self.src = video_source_track
+        self.frame_skip = 0
+        self.skip_n = 0  # 0 = proses tiap frame
+        self.last_dets = []
+
+        self.size = (RESIZE_WIDTH, RESIZE_HEIGHT) if (RESIZE_WIDTH and RESIZE_HEIGHT) else None
+        self.conf = 0.45
+        self.iou = 0.5
+        self.max_det = 30
+
+    async def recv(self) -> VideoFrame:
+        global frame_count, last_fps_time, current_fps
+        global inference_count, last_infer_time, current_infer_fps
+
+        frame: VideoFrame = await self.src.recv()
+        img = frame.to_ndarray(format="bgr24")
+
+        if self.size:
+            img = cv2.resize(img, self.size, interpolation=cv2.INTER_LINEAR)
+
+        do_infer = (self.frame_skip % (self.skip_n + 1) == 0)
+        if custom_model is not None and do_infer:
+            try:
+                res = custom_model(
+                    img,
+                    verbose=False,
+                    conf=self.conf,
+                    iou=self.iou,
+                    max_det=self.max_det,
+                    device='cuda' if torch.cuda.is_available() else 'cpu'
+                )
+                dets = []
+                for r in res:
+                    if getattr(r, "boxes", None) is None:
+                        continue
+                    for box in r.boxes:
+                        x1, y1, x2, y2 = box.xyxy[0].cpu().numpy()
+                        conf = float(box.conf[0].cpu().numpy())
+                        cls = int(box.cls[0].cpu().numpy())
+                        name = f"Class_{cls}"
+                        if hasattr(custom_model, "names") and cls < len(custom_model.names):
+                            name = custom_model.names[cls]
+                        dets.append((int(x1), int(y1), int(x2), int(y2), conf, name))
+                self.last_dets = dets
+            except Exception as e:
+                logger.warning(f"infer err: {e}")
+            finally:
+                inference_count += 1
+                now = time.time()
+                if now - last_infer_time >= 1.0:
+                    current_infer_fps = inference_count / (now - last_infer_time)
+                    inference_count = 0
+                    last_infer_time = now
+
+        self.frame_skip += 1
+
+        # draw overlay
+        for (x1, y1, x2, y2, conf, name) in self.last_dets:
+            cv2.rectangle(img, (x1, y1), (x2, y2), (50, 220, 50), 3)
+            label = f"{name} {conf:.2f}"
+            cv2.putText(img, label, (x1, max(0, y1 - 8)),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+
+        # perf text
+        frame_count += 1
+        now = time.time()
+        if now - last_fps_time >= 1.0:
+            current_fps = frame_count / (now - last_fps_time)
+            frame_count = 0
+            last_fps_time = now
+
+        cv2.putText(img, f"FPS: {current_fps:.1f}", (10, 30),
+                    cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 255, 0), 2)
+        cv2.putText(img, f"Inference: {current_infer_fps:.1f}", (10, 70),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 255), 2)
+        cv2.putText(img, f"Device: {device_info}", (10, 110),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 0, 255), 2)
+
+        img = img.astype(np.uint8)
+        out = VideoFrame.from_ndarray(img, format="bgr24")
+        out.pts = frame.pts
+        out.time_base = frame.time_base
+        return out
+
+# ==========================
+# FastAPI App + Lifespan
+# ==========================
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup
-    logger.info("Starting up Carter Island Backend...")
+    logger.info("Starting Carter Island Backend...")
     load_custom_model()
     yield
-    # Shutdown
     logger.info("Shutting down...")
     try:
-        # Clean up all peer connections
-        cleanup_tasks = []
-        for client_id in list(peer_connections.keys()):
-            task = asyncio.create_task(cleanup_peer_connection(client_id))
-            cleanup_tasks.append(task)
-        
-        if cleanup_tasks:
-            await asyncio.gather(*cleanup_tasks, return_exceptions=True)
-        
-        # Shutdown executor
+        for cid in list(peer_connections.keys()):
+            pc = peer_connections.pop(cid, None)
+            if pc:
+                await pc.close()
+        for t in bitrate_tasks.values():
+            t.cancel()
         inference_executor.shutdown(wait=True)
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
     except Exception as e:
-        logger.error(f"Shutdown error: {e}")
+        logger.warning(f"shutdown err: {e}")
 
-# Create FastAPI app with lifespan
-app = FastAPI(
-    title="Carter Island GPU-Optimized Stream Backend",
-    lifespan=lifespan
-)
+app = FastAPI(title="Carter Island GPU-Optimized Stream Backend", lifespan=lifespan)
 
-# CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://localhost:3001"],
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
+# ==========================
+# WebSocket / WS Signaling
+# ==========================
 @app.websocket("/ws/{client_id}")
 async def websocket_endpoint(websocket: WebSocket, client_id: str):
     await websocket.accept()
     active_connections.add(websocket)
-    logger.info(f"Client {client_id} connected")
-    
+    logger.info(f"WS client {client_id} connected")
+
     try:
         while True:
             data = await websocket.receive_text()
-            message = json.loads(data)
-            
-            if message["type"] == "offer":
-                await handle_offer(client_id, message, websocket)
-            elif message["type"] == "answer":
-                await handle_answer(client_id, message, websocket)
-            elif message["type"] == "ice-candidate":
-                await handle_ice_candidate(client_id, message, websocket)
-                
+            msg = json.loads(data)
+            if msg.get("type") == "offer":
+                await handle_offer(websocket, client_id, msg)
+            elif msg.get("type") == "ice-candidate":
+                # browser -> server ICE
+                pass
     except WebSocketDisconnect:
-        logger.info(f"WebSocket disconnect for client {client_id}")
+        logger.info(f"WS disconnect {client_id}")
     except Exception as e:
-        logger.error(f"WebSocket error for client {client_id}: {e}")
+        logger.exception(f"WS error {client_id}: {e}")
     finally:
-        # Clean up connection properly
         active_connections.discard(websocket)
-        
-        # Clean up peer connection asynchronously
-        if client_id in peer_connections:
-            try:
-                await cleanup_peer_connection(client_id)
-            except Exception as e:
-                logger.error(f"Error during cleanup for {client_id}: {e}")
-        
-        logger.info(f"Client {client_id} fully disconnected and cleaned up")
+        await cleanup_pc(client_id)
 
-async def handle_offer(client_id: str, message: dict, websocket: WebSocket):
-    """Handle WebRTC offer"""
-    try:
-        # Clean up any existing connection for this client first
-        if client_id in peer_connections:
-            logger.info(f"Cleaning up existing connection for {client_id}")
-            await cleanup_peer_connection(client_id)
-        
-        from aiortc import RTCConfiguration, RTCIceServer
-        rtc_config = RTCConfiguration(iceServers=[
-            RTCIceServer(urls="stun:stun.l.google.com:19302"),
-            RTCIceServer(urls="stun:stun1.l.google.com:19302"),
-            RTCIceServer(urls="stun:stun2.l.google.com:19302"),
-        ])
-        pc = RTCPeerConnection(configuration=rtc_config)
-        peer_connections[client_id] = pc
-        
-        @pc.on("connectionstatechange")
-        async def on_connectionstatechange():
-            logger.info(f"Client {client_id} connection state: {pc.connectionState}")
-            if pc.connectionState in ["failed", "closed"]:
-                await cleanup_peer_connection(client_id)
-        
-        @pc.on("track")
-        def on_track(track):
-            logger.info(f"Track received from {client_id}: {track.kind}")
-            
-            if track.kind == "video":
-                # Create custom model track
-                custom_track = CustomModelVideoStreamTrack(track)
-                pc.addTrack(custom_track)
-                
-                # Handle track ending
-                @track.on("ended")
-                async def on_track_ended():
-                    logger.info(f"Track ended for {client_id}")
-        
-        # Set remote description
-        await pc.setRemoteDescription(
-            RTCSessionDescription(sdp=message["sdp"], type=message["type"])
-        )
-        
-        # Create answer
-        answer = await pc.createAnswer()
-        await pc.setLocalDescription(answer)
-        
-        # Send answer
-        await websocket.send_text(json.dumps({
-            "type": "answer",
-            "sdp": pc.localDescription.sdp
-        }))
-        
-        logger.info(f"Answer sent to client {client_id}")
-        
-    except Exception as e:
-        logger.error(f"Error handling offer from {client_id}: {e}")
-        # Clean up on error
-        await cleanup_peer_connection(client_id)
+async def handle_offer(websocket: WebSocket, client_id: str, message: dict):
+    # Preferensi juga bisa dikirim di body offer dari FE
+    offer_sdp = message["sdp"]
+    pref_codec = (message.get("codec") or PREFER_CODEC).lower()
+    max_kbps = int(message.get("maxBitrateKbps") or MAX_BITRATE_KBPS_DEFAULT)
+    fps = int(message.get("fps") or TARGET_FPS)
 
-async def handle_answer(client_id: str, message: dict, websocket: WebSocket):
-    """Handle WebRTC answer"""
-    try:
-        if client_id in peer_connections:
-            pc = peer_connections[client_id]
-            await pc.setRemoteDescription(
-                RTCSessionDescription(sdp=message["sdp"], type=message["type"])
-            )
-            logger.info(f"Answer processed for client {client_id}")
-    except Exception as e:
-        logger.error(f"Error handling answer from {client_id}: {e}")
+    # Transport RTSP bisa lewat query params ws (...?transport=tcp)
+    qp = websocket.query_params
+    transport = (qp.get("transport") or RTSP_TRANSPORT).lower()
 
-async def handle_ice_candidate(client_id: str, message: dict, websocket: WebSocket):
-    """Handle ICE candidate"""
-    try:
-        if client_id in peer_connections and message.get("candidate"):
-            pc = peer_connections[client_id]
-            await pc.addIceCandidate(message["candidate"])
-    except Exception as e:
-        logger.error(f"Error handling ICE candidate from {client_id}: {e}")
+    # cleanup existing
+    await cleanup_pc(client_id)
 
+    pc = RTCPeerConnection()
+    peer_connections[client_id] = pc
+
+    # RTSP source
+    player = make_rtsp_player(transport)
+    if not player.video:
+        raise RuntimeError("RTSP player has no video track")
+    det_track = RtspDetectionTrack(player.video)
+
+    sender = pc.addTrack(det_track)
+
+    @pc.on("connectionstatechange")
+    async def _on_state():
+        logger.info(f"{client_id} state: {pc.connectionState}")
+        if pc.connectionState in ("failed", "closed", "disconnected"):
+            await cleanup_pc(client_id)
+
+    await pc.setRemoteDescription(RTCSessionDescription(sdp=offer_sdp, type="offer"))
+
+    sdp_munger = await set_sender_bitrate(sender, max_kbps * 1000, fps)
+
+    # create answer
+    answer = await pc.createAnswer()
+    tuned = tune_answer_sdp(
+        raw_sdp=answer.sdp,
+        kbps=max_kbps,
+        fps=fps,
+        prefer=pref_codec,
+        disable_twcc=DISABLE_TWCC_REM,
+    )
+    answer = RTCSessionDescription(sdp=tuned, type=answer.type)
+    await pc.setLocalDescription(answer)
+
+    task = asyncio.create_task(periodic_reapply_bitrate(client_id, sender, max_kbps * 1000, fps))
+    bitrate_tasks[client_id] = task
+
+    await websocket.send_text(json.dumps({"type": "answer", "sdp": pc.localDescription.sdp}))
+    logger.info(
+        f"Answer -> {client_id} | codec={pref_codec}, {max_kbps}kbps, fps={fps}, rtsp={transport}, "
+        f"twcc_remb_disabled={DISABLE_TWCC_REM}"
+    )
+
+async def cleanup_pc(client_id: str):
+    task = bitrate_tasks.pop(client_id, None)
+    if task:
+        task.cancel()
+    pc = peer_connections.pop(client_id, None)
+    if pc:
+        try:
+            for s in pc.getSenders():
+                try:
+                    if s.track:
+                        s.track.stop()
+                except Exception:
+                    pass
+            await pc.close()
+        except Exception:
+            pass
+        logger.info(f"PC {client_id} closed")
+
+# ==========================
+# REST Endpoints
+# ==========================
 @app.get("/")
 async def root():
     return {
         "message": "Carter Island GPU-Optimized Backend",
         "device": device_info,
         "cuda_available": torch.cuda.is_available(),
-        "model_loaded": custom_model is not None
+        "model_loaded": custom_model is not None,
+        "rtsp_url": RTSP_URL,
     }
 
 @app.get("/api/health")
-async def health_check():
-    """Health check with complete information"""
-    gpu_info = {}
+async def health():
+    gpu = {}
     if torch.cuda.is_available():
-        gpu_info = {
+        gpu = {
             "gpu_name": torch.cuda.get_device_name(0),
-            "gpu_memory_total": torch.cuda.get_device_properties(0).total_memory,
-            "gpu_memory_allocated": torch.cuda.memory_allocated(0),
-            "gpu_memory_reserved": torch.cuda.memory_reserved(0),
+            "mem_total": torch.cuda.get_device_properties(0).total_memory,
+            "mem_alloc": torch.cuda.memory_allocated(0),
+            "mem_reserved": torch.cuda.memory_reserved(0),
         }
-    
+
     model_info = {
         "model_loaded": custom_model is not None,
         "model_type": type(custom_model).__name__ if custom_model else None
     }
-    
-    # Add model classes if available
-    if custom_model and hasattr(custom_model, 'names'):
+    if custom_model and hasattr(custom_model, "names"):
         model_info["classes"] = custom_model.names
         model_info["num_classes"] = len(custom_model.names)
-    
+
     return {
         "status": "healthy",
         "device": device_info,
-        "model_loaded": custom_model is not None,
-        "active_connections": len(active_connections),
-        "active_peer_connections": len(peer_connections),
-        "fps": current_fps,
-        "inference_fps": current_inference_fps,
         "model_info": model_info,
-        "gpu_info": gpu_info,
-        "cuda_available": torch.cuda.is_available(),
-        "torch_version": torch.__version__
+        "fps": current_fps,
+        "inference_fps": current_infer_fps,
+        "active_peer_connections": len(peer_connections),
+        "cuda": torch.cuda.is_available(),
+        "torch": torch.__version__,
+        "gpu": gpu,
     }
 
 @app.get("/api/performance")
-async def get_performance():
-    """Real-time performance metrics"""
+async def perf():
     return {
         "fps": round(current_fps, 2),
-        "inference_fps": round(current_inference_fps, 2),
-        "active_connections": len(active_connections),
+        "inference_fps": round(current_infer_fps, 2),
         "active_peer_connections": len(peer_connections),
         "device": device_info,
         "model_loaded": custom_model is not None,
-        "cuda_available": torch.cuda.is_available()
+        "cuda_available": torch.cuda.is_available(),
     }
 
 @app.get("/api/model-info")
-async def get_model_info():
-    """Model information"""
-    if custom_model is not None:
-        info = {
-            "model_loaded": True,
-            "model_type": type(custom_model).__name__,
-            "device": device_info
-        }
-        
-        # Add classes if available
-        if hasattr(custom_model, 'names'):
-            info["classes"] = custom_model.names
-            info["num_classes"] = len(custom_model.names)
-        
-        return info
-    
-    return {"model_loaded": False}
+async def model_info():
+    if not custom_model:
+        return {"model_loaded": False}
+    info = {
+        "model_loaded": True,
+        "model_type": type(custom_model).__name__,
+        "device": device_info
+    }
+    if hasattr(custom_model, "names"):
+        info["classes"] = custom_model.names
+        info["num_classes"] = len(custom_model.names)
+    return info
 
 if __name__ == "__main__":
+    import uvicorn
     uvicorn.run(
-        app, 
-        host="0.0.0.0", 
+        "main:app",
+        host="0.0.0.0",
         port=8000,
         log_level="info",
         access_log=False
