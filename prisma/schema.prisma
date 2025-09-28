@@ -1,5 +1,5 @@
 generator client {
-  provider = "prisma-client-js"
+  provider = "prisma-client-py"
 }
 
 datasource db {
@@ -51,4 +51,26 @@ model FishDetection {
   createdAt    DateTime  @default(now()) @map("created_at")
   
   @@map("fish_detections")
+}
+
+model Recording {
+  id          String   @id @default(cuid())
+  filename    String   @unique
+  originalName String? @map("original_name")
+  filePath    String   @map("file_path")
+  fileSize    Int      @map("file_size")
+  duration    Float?   // durasi dalam detik
+  mimeType    String   @map("mime_type")
+  userId      String?  @map("user_id") // jika mau track siapa yang record
+  status      RecordingStatus @default(COMPLETED)
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@map("recordings")
+}
+
+enum RecordingStatus {
+  PROCESSING
+  COMPLETED
+  FAILED
 }

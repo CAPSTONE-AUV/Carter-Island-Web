@@ -5,6 +5,7 @@ import Header from '@/components/layout/Header';
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import RecordingControls from '@/components/RecordingControls'
+import { usePathname } from 'next/navigation';
 
 interface StreamComponentProps {
   apiUrl?: string;

@@ -1,3 +1,4 @@
+//src/app/dashboard/recordings/page.tsx
 'use client'
 
 import { useState, useEffect } from 'react'
@@ -41,13 +42,36 @@ export default function RecordingsPage() {
     setPlayingVideo(filename)
   }
 
-  const handleDownload = (filename: string) => {
-    const link = document.createElement('a')
-    link.href = `http://localhost:8000/api/recordings/${filename}`
-    link.download = filename
-    document.body.appendChild(link)
-    link.click()
-    document.body.removeChild(link)
+  const handleDownload = async (filename: string) => {
+    try {
+      // Fetch file sebagai blob
+      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/recordings/${filename}`)
+      if (!response.ok) throw new Error('Download failed')
+      
+      // Convert ke blob
+      const blob = await response.blob()
+      
+      // Create object URL
+      const url = window.URL.createObjectURL(blob)
+      
+      // Create download link
+      const link = document.createElement('a')
+      link.href = url
+      link.download = filename // Ini akan memaksa download
+      link.style.display = 'none'
+      
+      // Append, click, dan cleanup
+      document.body.appendChild(link)
+      link.click()
+      document.body.removeChild(link)
+      
+      // Cleanup object URL
+      window.URL.revokeObjectURL(url)
+      
+    } catch (error) {
+      console.error('Download failed:', error)
+      toast.error('Gagal mendownload file')
+    }
   }
 
   const handleDelete = async (filename: string) => {
@@ -107,12 +131,17 @@ export default function RecordingsPage() {
                   Close
                 </Button>
               </div>
-              <video 
-                src={`/api/recordings/${playingVideo}`}
-                controls
-                className="w-full max-h-96 bg-black rounded"
-                autoPlay
-              />
+              {playingVideo ? (
+                <video
+                  key={playingVideo}
+                  controls
+                  preload="metadata"
+                  src={`${process.env.NEXT_PUBLIC_API_URL}/api/recordings/${playingVideo}`}
+                  className="w-full max-h-96 bg-black rounded"
+                />
+              ) : (
+                <div className="text-sm text-muted-foreground">Pilih file di list untuk diputar.</div>
+              )}
             </CardContent>
           </Card>
         )}

@@ -1,3 +1,4 @@
+//src/components/RecordingControls.tsx
 'use client'
 
 import { useState, useRef, useCallback, useEffect } from 'react'

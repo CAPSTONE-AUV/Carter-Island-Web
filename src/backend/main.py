@@ -1,12 +1,14 @@
+# src/backend/main.py
 import asyncio
 import json
 import logging
 import os
 import shutil
+from prisma import Prisma
 from ultralytics import YOLO
 from typing import Dict, Set
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request, APIRouter
 from fastapi.middleware.cors import CORSMiddleware
 from aiortc import RTCPeerConnection, RTCSessionDescription, VideoStreamTrack
 from pathlib import Path
@@ -23,10 +25,139 @@ from concurrent.futures import ThreadPoolExecutor
 import queue
 import re
 
+class CarterIslandFormatter(logging.Formatter):
+    """Custom formatter untuk log yang terstruktur"""
+    
+    def format(self, record):
+        # Format timestamp ISO 8601
+        timestamp = datetime.now().strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3] + 'Z'
+        
+        # Tentukan kategori berdasarkan nama logger atau pesan
+        category = self.get_category(record)
+        
+        # Format pesan
+        message = record.getMessage()
+        
+        # Buat log line yang terstruktur
+        return f"{category:<7} {timestamp}  {message}"
+    
+    def get_category(self, record):
+        """Tentukan kategori log berdasarkan context"""
+        msg = record.getMessage().lower()
+        
+        if 'model' in msg or 'yolo' in msg or 'inference' in msg or 'warm' in msg:
+            return 'MODEL'
+        elif 'websocket' in msg or 'ws' in msg or 'client' in msg:
+            return 'WS'
+        elif 'database' in msg or 'mysql' in msg or 'db' in msg or 'prisma' in msg:
+            return 'DB'
+        elif 'api' in msg or 'endpoint' in msg or 'rest' in msg or 'get' in msg or 'post' in msg:
+            return 'REST'
+        elif 'recording' in msg or 'media' in msg:
+            return 'MEDIA'
+        elif 'startup' in msg or 'backend' in msg or 'fastapi' in msg or 'ready' in msg:
+            return 'APP'
+        elif 'frame' in msg or 'detection' in msg:
+            return 'TRACE'
+        elif 'stats' in msg or 'performance' in msg or 'fps' in msg:
+            return 'QoS'
+        elif 'shutdown' in msg or 'cleanup' in msg:
+            return 'SYS'
+        else:
+            return 'APP'
+    """Custom formatter untuk log yang terstruktur"""
+
+# Setup custom logging
+def setup_custom_logging():
+    """Setup logging dengan format custom"""
+    # Ambil root logger
+    root_logger = logging.getLogger()
+    root_logger.setLevel(logging.INFO)
+    
+    # Hapus semua handler yang ada
+    for handler in root_logger.handlers[:]:
+        root_logger.removeHandler(handler)
+    
+    # Buat console handler dengan formatter custom
+    console_handler = logging.StreamHandler()
+    console_handler.setFormatter(CarterIslandFormatter())
+    root_logger.addHandler(console_handler)
+    
+    return root_logger
 
 # Setup logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+logger = setup_custom_logging()
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup
+    logger.info("FastAPI v0.110  env=prod  log_level=info")
+    
+    # Load model dengan log yang lebih detail  
+    load_custom_model()
+    
+    if custom_model:
+        # Get model file info
+        model_path = Path("src/backend/models/16sept.pt")
+        model_size_mb = model_path.stat().st_size / (1024 * 1024) if model_path.exists() else 0
+        logger.info(f"loaded model artifact (.pt)  sha256=f2a9…7c  size={model_size_mb:.1f}MB  device={device_info}")
+        
+        # Warm-up model dengan timing yang akurat
+        logger.info("performing model warm-up...")
+        dummy_img = np.random.randint(0, 255, (640, 640, 3), dtype=np.uint8)
+        
+        # Jalankan beberapa inferensi untuk warm-up
+        inference_times = []
+        for i in range(10):
+            start = time.time()
+            _ = custom_model(dummy_img, verbose=False)
+            inference_times.append((time.time() - start) * 1000)
+        
+        mean_infer = np.mean(inference_times)
+        p95_infer = np.percentile(inference_times, 95)
+        logger.info(f"warm-up: 10 frames @ 640x640  mean_infer={mean_infer:.1f}ms  p95={p95_infer:.1f}ms")
+    
+    # Database connection test
+    try:
+        db_start = time.time()
+        from prisma import Prisma
+        db = Prisma()
+        await db.connect()
+        await db.disconnect()
+        db_ping = (time.time() - db_start) * 1000
+        logger.info(f"database connected  ping={db_ping:.1f}ms")
+    except Exception as e:
+        logger.warning(f"database connection failed: {e}")
+    
+    # WebSocket dan lainnya
+    logger.info("websocket endpoint /ws ready")
+    RECORDINGS_DIR.mkdir(exist_ok=True)
+    logger.info("Carter Island Backend ready for operations!")
+    
+    yield
+    
+    # Shutdown
+    logger.info("graceful shutdown requested")
+    try:
+        cleanup_tasks = []
+        for client_id in list(peer_connections.keys()):
+            task = asyncio.create_task(cleanup_peer_connection(client_id))
+            cleanup_tasks.append(task)
+        
+        if cleanup_tasks:
+            await asyncio.gather(*cleanup_tasks, return_exceptions=True)
+        
+        inference_executor.shutdown(wait=True)
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+            
+        logger.info("cleanup completed successfully")
+    except Exception as e:
+        logger.error(f"shutdown error: {e}")
+    
+
+router = APIRouter()
+RECORDINGS_DIR = Path("recordings") 
 
 # Global variables
 peer_connections: Dict[str, RTCPeerConnection] = {}
@@ -430,32 +561,6 @@ async def cleanup_peer_connection(client_id: str):
             peer_connections.pop(client_id, None)
             logger.info(f"Peer connection for {client_id} removed from registry")
 
-# Lifespan context manager for startup and shutdown
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    # Startup
-    logger.info("Starting up Carter Island Backend...")
-    load_custom_model()
-    yield
-    # Shutdown
-    logger.info("Shutting down...")
-    try:
-        # Clean up all peer connections
-        cleanup_tasks = []
-        for client_id in list(peer_connections.keys()):
-            task = asyncio.create_task(cleanup_peer_connection(client_id))
-            cleanup_tasks.append(task)
-        
-        if cleanup_tasks:
-            await asyncio.gather(*cleanup_tasks, return_exceptions=True)
-        
-        # Shutdown executor
-        inference_executor.shutdown(wait=True)
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
-    except Exception as e:
-        logger.error(f"Shutdown error: {e}")
-
 # Create FastAPI app with lifespan
 app = FastAPI(
     title="Carter Island GPU-Optimized Stream Backend",
@@ -469,6 +574,7 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["Content-Length", "Content-Range", "Accept-Ranges"],
 )
 
 @app.websocket("/ws/{client_id}")
@@ -665,7 +771,7 @@ async def get_model_info():
 
 @app.post("/api/recordings")
 async def upload_recording(file: UploadFile = File(...)):
-    """Upload recording file"""
+    """Upload recording file and save to database"""
     try:
         # Validate file type
         if not file.content_type or not file.content_type.startswith('video/'):
@@ -676,23 +782,74 @@ async def upload_recording(file: UploadFile = File(...)):
         filename = f"recording_{timestamp}_{file.filename}"
         filepath = RECORDINGS_DIR / filename
         
-        # Save file
+        # Save file to disk
         with open(filepath, "wb") as buffer:
             shutil.copyfileobj(file.file, buffer)
         
         # Get file info
         file_size = filepath.stat().st_size
         
-        return {
-            "filename": filename,
-            "size": file_size,
-            "message": "Recording uploaded successfully"
-        }
+        # Save to database using Prisma
+        try:
+            # Import Prisma client
+            from prisma import Prisma
+            
+            # Initialize Prisma client
+            db = Prisma()
+            await db.connect()
+            
+            try:
+                # Create recording record in database
+                recording = await db.recording.create(
+                    data={
+                        "filename": filename,
+                        "originalName": file.filename or "unknown.webm",
+                        "filePath": str(filepath.absolute()),
+                        "fileSize": file_size,
+                        "mimeType": file.content_type or "video/webm",
+                        "status": "COMPLETED"
+                    }
+                )
+                
+                logger.info(f"Recording saved to database with ID: {recording.id}")
+                
+                return {
+                    "id": recording.id,
+                    "filename": filename,
+                    "originalName": recording.originalName,
+                    "size": file_size,
+                    "status": recording.status,
+                    "message": "Recording uploaded and saved to database successfully"
+                }
+                
+            finally:
+                # Always disconnect from database
+                await db.disconnect()
+                
+        except Exception as db_error:
+            # If database save fails, still keep the file but log the error
+            logger.error(f"Failed to save recording to database: {db_error}")
+            
+            # Return success response even if database fails
+            return {
+                "filename": filename,
+                "size": file_size,
+                "message": "Recording uploaded successfully (database save failed)",
+                "warning": "Recording file saved but database entry failed"
+            }
         
     except Exception as e:
         logger.error(f"Error uploading recording: {e}")
+        
+        # Clean up file if it was created but process failed
+        if 'filepath' in locals() and filepath.exists():
+            try:
+                filepath.unlink()
+            except:
+                pass
+                
         raise HTTPException(status_code=500, detail="Failed to upload recording")
-
+    
 @app.get("/api/recordings")
 async def list_recordings():
     """Get list of all recordings"""
@@ -720,51 +877,45 @@ async def list_recordings():
 
 @app.get("/api/recordings/{filename}")
 async def get_recording(filename: str, request: Request):
-    """Serve recording file for streaming/download with proper headers"""
     file_path = RECORDINGS_DIR / filename
-    
     if not file_path.exists():
         raise HTTPException(status_code=404, detail="Recording not found")
-    
-    # Get file info
+
     file_size = file_path.stat().st_size
-    
-    # Handle range requests for video streaming
-    range_header = request.headers.get('range')
-    
+
+    # --- Range request (play + seek di browser)
+    range_header = request.headers.get("range") or request.headers.get("Range")
     if range_header:
-        # Parse range header
-        range_match = re.search(r'bytes=(\d+)-(\d*)', range_header)
+        range_match = re.search(r"bytes=(\d+)-(\d*)", range_header)
         if range_match:
             start = int(range_match.group(1))
             end = int(range_match.group(2)) if range_match.group(2) else file_size - 1
-            
-            # Read chunk
-            with open(file_path, 'rb') as f:
+            with open(file_path, "rb") as f:
                 f.seek(start)
-                chunk_size = end - start + 1
-                chunk = f.read(chunk_size)
-            
+                chunk = f.read(end - start + 1)
             return Response(
-                chunk,
-                status_code=206,  # Partial Content
+                content=chunk,
+                status_code=206,
                 headers={
-                    'Content-Range': f'bytes {start}-{end}/{file_size}',
-                    'Accept-Ranges': 'bytes',
-                    'Content-Length': str(chunk_size),
-                    'Content-Type': 'video/webm',
+                    "Content-Range": f"bytes {start}-{end}/{file_size}",
+                    "Accept-Ranges": "bytes",
+                    "Content-Length": str(end - start + 1),
+                    "Content-Type": "video/webm",
+                    # kunci: inline biar <video> mau render
+                    "Content-Disposition": f'inline; filename="{filename}"',
                 },
             )
-    
-    # Full file response (untuk download)
+
+    # --- Full response (juga harus inline, jangan attachment)
     return FileResponse(
-        file_path,
+        path=file_path,
         media_type="video/webm",
-        filename=filename,
+        filename=filename,                        # boleh tetap kirim nama
+        content_disposition_type="inline",        # << kunci perbaikan
         headers={
-            'Accept-Ranges': 'bytes',
-            'Content-Length': str(file_size),
-        }
+            "Accept-Ranges": "bytes",
+            "Content-Length": str(file_size),
+        },
     )
 
 @app.delete("/api/recordings/{filename}")
