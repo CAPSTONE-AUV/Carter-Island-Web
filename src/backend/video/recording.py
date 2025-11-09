@@ -7,8 +7,6 @@ from datetime import datetime
 import pytz
 from config import (
     RECORDINGS_DIR,
-    RECORDING_CODEC,
-    RECORDING_FPS,
     RESIZE_WIDTH,
     RESIZE_HEIGHT,
     API_BASE_URL,
