@@ -8,9 +8,12 @@ import torch
 import asyncio
 import logging
 import numpy as np
-from typing import Dict, Set, Optional, Callable
+import uuid
+import httpx
+from typing import Dict, Set, Optional, Callable, List, Tuple
 from contextlib import asynccontextmanager
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
@@ -41,6 +44,12 @@ PREFER_CODEC = os.getenv("PREFER_CODEC", "h264").lower()
 
 DISABLE_TWCC_REM = os.getenv("DISABLE_TWCC_REMB", "1") == "1"
 
+# ---- Database Saving Config ----
+SAVE_DETECTIONS_ENABLED = os.getenv("SAVE_DETECTIONS_ENABLED", "true").lower() == "true"
+API_BASE_URL = os.getenv("API_BASE_URL", "http://localhost:3000")
+SAVE_INTERVAL_SECONDS = float(os.getenv("SAVE_INTERVAL_SECONDS", "5.0"))  # Simpan setiap 5 detik
+MIN_DETECTIONS_TO_SAVE = int(os.getenv("MIN_DETECTIONS_TO_SAVE", "1"))  # Minimal 1 ikan terdeteksi
+
 # ==========================
 # Globals & Performance
 # ==========================
@@ -51,6 +60,10 @@ bitrate_tasks: Dict[str, asyncio.Task] = {}
 custom_model = None
 device_info = "CPU"
 inference_executor = ThreadPoolExecutor(max_workers=2)
+
+# Database saving
+http_client: Optional[httpx.AsyncClient] = None
+streaming_session_id: str = str(uuid.uuid4())  # ID unik untuk sesi streaming ini
 
 # Perf counters
 frame_count = 0
@@ -98,6 +111,73 @@ def load_custom_model():
         logger.exception(f"Failed to load model: {e}")
         custom_model = None
         device_info = "Error"
+
+# ==========================
+# Database Saving Functions
+# ==========================
+async def save_detections_to_db(
+    detections: List[Tuple[int, int, int, int, float, str]],
+    frame_number: Optional[int] = None
+) -> bool:
+    """
+    Simpan hasil deteksi ke database melalui API Next.js
+
+    Args:
+        detections: List of (x1, y1, x2, y2, confidence, class_name)
+        frame_number: Nomor frame (opsional)
+
+    Returns:
+        bool: True jika berhasil, False jika gagal
+    """
+    if not SAVE_DETECTIONS_ENABLED or not http_client:
+        return False
+
+    if len(detections) < MIN_DETECTIONS_TO_SAVE:
+        return False
+
+    try:
+        # Format data untuk API
+        detection_details = []
+        for (x1, y1, x2, y2, conf, name) in detections:
+            detection_details.append({
+                "className": name,
+                "confidence": float(conf),
+                "boundingBox": {
+                    "x1": float(x1),
+                    "y1": float(y1),
+                    "x2": float(x2),
+                    "y2": float(y2)
+                }
+            })
+
+        payload = {
+            "sessionId": streaming_session_id,
+            "timestamp": datetime.utcnow().isoformat() + "Z",
+            "fishCount": len(detections),
+            "frameNumber": frame_number,
+            "detections": detection_details
+        }
+
+        # Kirim ke API
+        response = await http_client.post(
+            f"{API_BASE_URL}/api/detections",
+            json=payload,
+            timeout=5.0
+        )
+
+        if response.status_code == 201:
+            logger.info(f"✓ Saved {len(detections)} detections to database (frame {frame_number})")
+            return True
+        else:
+            logger.warning(f"Failed to save detections: HTTP {response.status_code} - {response.text}")
+            return False
+
+    except httpx.TimeoutException:
+        logger.warning("Timeout while saving detections to database")
+        return False
+    except Exception as e:
+        logger.error(f"Error saving detections to database: {e}")
+        return False
 
 # ==========================
 # Bitrate helpers (aiortc + SDP munging)
@@ -253,6 +333,10 @@ class RtspDetectionTrack(VideoStreamTrack):
         self.iou = 0.5
         self.max_det = 30
 
+        # Database saving
+        self.last_save_time = time.time()
+        self.save_task: Optional[asyncio.Task] = None
+
     async def recv(self) -> VideoFrame:
         global frame_count, last_fps_time, current_fps
         global inference_count, last_infer_time, current_infer_fps
@@ -287,6 +371,19 @@ class RtspDetectionTrack(VideoStreamTrack):
                             name = custom_model.names[cls]
                         dets.append((int(x1), int(y1), int(x2), int(y2), conf, name))
                 self.last_dets = dets
+
+                # Simpan deteksi ke database secara periodik
+                now = time.time()
+                if (SAVE_DETECTIONS_ENABLED and
+                    len(dets) >= MIN_DETECTIONS_TO_SAVE and
+                    now - self.last_save_time >= SAVE_INTERVAL_SECONDS):
+                    # Simpan tanpa blocking
+                    if self.save_task is None or self.save_task.done():
+                        self.save_task = asyncio.create_task(
+                            save_detections_to_db(dets.copy(), self.frame_skip)
+                        )
+                        self.last_save_time = now
+
             except Exception as e:
                 logger.warning(f"infer err: {e}")
             finally:
@@ -332,11 +429,27 @@ class RtspDetectionTrack(VideoStreamTrack):
 # ==========================
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    global http_client, streaming_session_id
     logger.info("Starting Carter Island Backend...")
     load_custom_model()
+
+    # Initialize HTTP client untuk database saving
+    if SAVE_DETECTIONS_ENABLED:
+        http_client = httpx.AsyncClient(timeout=httpx.Timeout(10.0))
+        logger.info(f"Database saving enabled - Session ID: {streaming_session_id}")
+        logger.info(f"API endpoint: {API_BASE_URL}/api/detections")
+        logger.info(f"Save interval: {SAVE_INTERVAL_SECONDS}s")
+    else:
+        logger.info("Database saving disabled")
+
     yield
+
     logger.info("Shutting down...")
     try:
+        # Close HTTP client
+        if http_client:
+            await http_client.aclose()
+
         for cid in list(peer_connections.keys()):
             pc = peer_connections.pop(cid, None)
             if pc:

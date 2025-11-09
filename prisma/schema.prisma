@@ -23,9 +23,54 @@ model User {
   updatedAt   DateTime @updatedAt @map("updated_at")
 
   // Index untuk cursor pagination
-  @@index([createdAt, id], map: "idx_users_created_at_id")           
-  @@index([role, createdAt, id], map: "idx_users_role_created_at_id")     
+  @@index([createdAt, id], map: "idx_users_created_at_id")
+  @@index([role, createdAt, id], map: "idx_users_role_created_at_id")
   @@index([createdAt(sort: Desc), id(sort: Desc)], map: "idx_users_created_desc_id_desc")
 
   @@map("users")
+}
+
+// Model untuk menyimpan hasil deteksi ikan per frame
+model FishDetection {
+  id               String            @id @default(cuid())
+  sessionId        String?           @map("session_id") // ID sesi streaming (opsional)
+  timestamp        DateTime          @default(now()) // Waktu deteksi
+  fishCount        Int               @map("fish_count") // Jumlah ikan terdeteksi dalam frame ini
+  frameNumber      Int?              @map("frame_number") // Nomor frame (opsional)
+  imageUrl         String?           @map("image_url") @db.Text // URL gambar snapshot (opsional)
+  createdAt        DateTime          @default(now()) @map("created_at")
+  updatedAt        DateTime          @updatedAt @map("updated_at")
+
+  // Relasi ke detail deteksi individual
+  detectionDetails DetectionDetail[]
+
+  // Index untuk query berdasarkan waktu dan sesi
+  @@index([timestamp(sort: Desc)], map: "idx_detections_timestamp")
+  @@index([sessionId, timestamp], map: "idx_detections_session_timestamp")
+  @@index([createdAt(sort: Desc)], map: "idx_detections_created_desc")
+
+  @@map("fish_detections")
+}
+
+// Model untuk menyimpan detail setiap ikan yang terdeteksi
+model DetectionDetail {
+  id              String        @id @default(cuid())
+  detectionId     String        @map("detection_id") // FK ke FishDetection
+  className       String        @map("class_name") // Nama spesies/kelas ikan
+  confidence      Float         // Tingkat kepercayaan (0-1)
+  boundingBoxX1   Float         @map("bbox_x1") // Koordinat bounding box
+  boundingBoxY1   Float         @map("bbox_y1")
+  boundingBoxX2   Float         @map("bbox_x2")
+  boundingBoxY2   Float         @map("bbox_y2")
+  createdAt       DateTime      @default(now()) @map("created_at")
+
+  // Relasi ke FishDetection
+  detection       FishDetection @relation(fields: [detectionId], references: [id], onDelete: Cascade)
+
+  // Index untuk query berdasarkan kelas dan confidence
+  @@index([detectionId], map: "idx_details_detection_id")
+  @@index([className], map: "idx_details_class_name")
+  @@index([confidence(sort: Desc)], map: "idx_details_confidence_desc")
+
+  @@map("detection_details")
 }
