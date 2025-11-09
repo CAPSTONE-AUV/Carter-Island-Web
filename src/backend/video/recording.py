@@ -79,16 +79,28 @@ async def start_recording(client_id: str, detection_track) -> Optional[str]:
         filename = f"recording_{recording_id}.mp4"
         filepath = os.path.join(RECORDINGS_DIR, filename)
 
-        # Create video writer
-        fourcc = cv2.VideoWriter.fourcc(*'mp4v')
-        writer = cv2.VideoWriter(
-            filepath,
-            fourcc,
-            RECORDING_FPS,
-            (RESIZE_WIDTH, RESIZE_HEIGHT)
-        )
+        # Create video writer with H.264 codec for better browser compatibility
+        # Try different H.264 codec variants
+        fourcc_options = [
+            cv2.VideoWriter.fourcc(*'avc1'),  # H.264 (most compatible)
+            cv2.VideoWriter.fourcc(*'mp4v'),  # Fallback
+        ]
 
-        if not writer.isOpened():
+        writer = None
+        for fourcc in fourcc_options:
+            writer = cv2.VideoWriter(
+                filepath,
+                fourcc,
+                RECORDING_FPS,
+                (RESIZE_WIDTH, RESIZE_HEIGHT)
+            )
+            if writer.isOpened():
+                logger.info(f"Using codec: {fourcc}")
+                break
+            writer.release()
+            writer = None
+
+        if writer is None or not writer.isOpened():
             logger.error(f"Failed to open video writer for {filepath}")
             return None
 
