@@ -75,15 +75,25 @@ async def start_recording(client_id: str, detection_track) -> Optional[str]:
         return None
 
     try:
+        # Import here to avoid circular dependency
+        from video.detection_track import get_fps
+
         recording_id = f"{client_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-        filename = f"recording_{recording_id}.mp4"
+        filename = f"recording_{recording_id}.webm"
         filepath = os.path.join(RECORDINGS_DIR, filename)
 
-        # Create video writer with H.264 codec for better browser compatibility
-        # Try different H.264 codec variants
+        # Get actual stream FPS to avoid speed issues
+        actual_fps = get_fps()
+        if actual_fps <= 0:
+            actual_fps = 10.0  # Default to 10 FPS if not yet calculated
+
+        logger.info(f"Recording at {actual_fps:.1f} FPS (actual stream rate)")
+
+        # Create video writer with WebM format (VP8 codec) for browser compatibility
+        # WebM is natively supported by all modern browsers
         fourcc_options = [
-            cv2.VideoWriter.fourcc(*'avc1'),  # H.264 (most compatible)
-            cv2.VideoWriter.fourcc(*'mp4v'),  # Fallback
+            cv2.VideoWriter.fourcc(*'VP80'),  # VP8 codec for WebM
+            cv2.VideoWriter.fourcc(*'VP90'),  # VP9 codec (fallback)
         ]
 
         writer = None
@@ -91,11 +101,11 @@ async def start_recording(client_id: str, detection_track) -> Optional[str]:
             writer = cv2.VideoWriter(
                 filepath,
                 fourcc,
-                RECORDING_FPS,
+                actual_fps,  # Use actual stream FPS, not hardcoded 30
                 (RESIZE_WIDTH, RESIZE_HEIGHT)
             )
             if writer.isOpened():
-                logger.info(f"Using codec: {fourcc}")
+                logger.info(f"Using codec: {fourcc} at {actual_fps:.1f} FPS")
                 break
             writer.release()
             writer = None
