@@ -6,6 +6,8 @@ import time
 import asyncio
 import logging
 import numpy as np
+import queue
+import threading
 from typing import Optional, List, Tuple
 from aiortc import VideoStreamTrack
 from av import VideoFrame
@@ -53,9 +55,12 @@ class RtspDetectionTrack(VideoStreamTrack):
         self.last_save_time = time.time()
         self.save_task: Optional[asyncio.Task] = None
 
-        # Recording support
+        # Recording support with background thread for non-blocking writes
         self.recording = False
         self.video_writer: Optional[cv2.VideoWriter] = None
+        self.frame_queue: Optional[queue.Queue] = None
+        self.writer_thread: Optional[threading.Thread] = None
+        self.stop_writer_thread = False
 
     async def recv(self) -> VideoFrame:
         """Receive and process a video frame"""
@@ -122,10 +127,15 @@ class RtspDetectionTrack(VideoStreamTrack):
         cv2.putText(img, f"Device: {device}", (10, 110),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 0, 255), 2)
 
-        # Write every frame to video if recording (no frame skipping)
-        # VideoWriter FPS is set based on actual stream FPS when recording starts
-        if self.recording and self.video_writer is not None:
-            self.video_writer.write(img)
+        # Add frame to queue for background video writing (non-blocking)
+        # This prevents FPS drop by offloading encoding to background thread
+        if self.recording and self.frame_queue is not None:
+            try:
+                # Use put_nowait to avoid blocking if queue is full
+                # If queue is full, skip this frame to maintain FPS
+                self.frame_queue.put_nowait(img.copy())
+            except queue.Full:
+                pass  # Skip frame if queue is full to maintain performance
 
         img = img.astype(np.uint8)
         out = VideoFrame.from_ndarray(img, format="bgr24")
@@ -133,18 +143,62 @@ class RtspDetectionTrack(VideoStreamTrack):
         out.time_base = frame.time_base
         return out
 
+    def _video_writer_thread(self):
+        """Background thread for writing frames to video file"""
+        logger.info("Video writer thread started")
+        frames_written = 0
+
+        while not self.stop_writer_thread:
+            try:
+                # Wait for frame with timeout to allow thread to check stop flag
+                frame = self.frame_queue.get(timeout=0.5)
+
+                if self.video_writer is not None:
+                    self.video_writer.write(frame)
+                    frames_written += 1
+
+            except queue.Empty:
+                continue
+            except Exception as e:
+                logger.error(f"Error writing frame to video: {e}")
+
+        logger.info(f"Video writer thread stopped. Frames written: {frames_written}")
+
     def start_recording(self, video_writer: cv2.VideoWriter):
-        """Start recording frames to video file"""
+        """Start recording frames to video file using background thread"""
         self.recording = True
         self.video_writer = video_writer
-        logger.info(f"Started recording video frames at actual stream FPS")
+        self.stop_writer_thread = False
+
+        # Create queue for frames (max 30 frames buffered)
+        self.frame_queue = queue.Queue(maxsize=30)
+
+        # Start background writer thread
+        self.writer_thread = threading.Thread(target=self._video_writer_thread, daemon=True)
+        self.writer_thread.start()
+
+        logger.info(f"Started recording with background thread (non-blocking)")
 
     def stop_recording(self):
-        """Stop recording frames"""
+        """Stop recording frames and cleanup background thread"""
         self.recording = False
+
+        # Stop the writer thread
+        self.stop_writer_thread = True
+
+        # Wait for thread to finish (max 5 seconds)
+        if self.writer_thread is not None:
+            self.writer_thread.join(timeout=5.0)
+            self.writer_thread = None
+
+        # Release video writer
         if self.video_writer is not None:
             self.video_writer.release()
             self.video_writer = None
+
+        # Clear queue
+        self.frame_queue = None
+
         logger.info("Stopped recording video frames")
 
 
