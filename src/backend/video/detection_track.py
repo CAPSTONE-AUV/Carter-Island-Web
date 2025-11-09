@@ -56,8 +56,6 @@ class RtspDetectionTrack(VideoStreamTrack):
         # Recording support
         self.recording = False
         self.video_writer: Optional[cv2.VideoWriter] = None
-        self.recording_frame_count = 0  # Count frames for recording
-        self.recording_target_fps = 30.0  # Target recording FPS
 
     async def recv(self) -> VideoFrame:
         """Receive and process a video frame"""
@@ -124,21 +122,10 @@ class RtspDetectionTrack(VideoStreamTrack):
         cv2.putText(img, f"Device: {device}", (10, 110),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 0, 255), 2)
 
-        # Write to video file if recording with proper frame rate control
+        # Write every frame to video if recording (no frame skipping)
+        # VideoWriter FPS is set based on actual stream FPS when recording starts
         if self.recording and self.video_writer is not None:
-            # Calculate which frames to write based on actual FPS vs target recording FPS
-            # If stream is 60 FPS and target is 30 FPS, write every other frame
-            # If stream is 90 FPS and target is 30 FPS, write every 3rd frame
-
-            actual_fps = current_fps if current_fps > 0 else 30.0
-            frame_skip_ratio = actual_fps / self.recording_target_fps
-
-            # Write frame if it should be included based on the ratio
-            # Example: if ratio is 2.0, write when frame_count % 2 == 0
-            if frame_skip_ratio <= 1.0 or (self.recording_frame_count % int(frame_skip_ratio)) == 0:
-                self.video_writer.write(img)
-
-            self.recording_frame_count += 1
+            self.video_writer.write(img)
 
         img = img.astype(np.uint8)
         out = VideoFrame.from_ndarray(img, format="bgr24")
@@ -150,8 +137,7 @@ class RtspDetectionTrack(VideoStreamTrack):
         """Start recording frames to video file"""
         self.recording = True
         self.video_writer = video_writer
-        self.recording_frame_count = 0  # Reset frame counter
-        logger.info(f"Started recording video frames at {self.recording_target_fps} FPS")
+        logger.info(f"Started recording video frames at actual stream FPS")
 
     def stop_recording(self):
         """Stop recording frames"""
@@ -159,7 +145,6 @@ class RtspDetectionTrack(VideoStreamTrack):
         if self.video_writer is not None:
             self.video_writer.release()
             self.video_writer = None
-        self.recording_frame_count = 0  # Reset frame counter
         logger.info("Stopped recording video frames")
 
 

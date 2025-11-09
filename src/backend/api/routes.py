@@ -148,10 +148,13 @@ def setup_routes(app: FastAPI):
         if not os.path.exists(filepath):
             raise HTTPException(status_code=404, detail="Video not found")
 
+        # Detect media type based on file extension
+        media_type = "video/webm" if filename.endswith(".webm") else "video/mp4"
+
         # Return video file with proper content type
         return FileResponse(
             filepath,
-            media_type="video/mp4",
+            media_type=media_type,
             filename=filename
         )
 
@@ -169,10 +172,13 @@ def setup_routes(app: FastAPI):
         if not os.path.exists(filepath):
             raise HTTPException(status_code=404, detail="Video not found")
 
+        # Detect media type based on file extension
+        media_type = "video/webm" if filename.endswith(".webm") else "video/mp4"
+
         # Force download with proper headers
         return FileResponse(
             filepath,
-            media_type="video/mp4",
+            media_type=media_type,
             filename=filename,
             headers={"Content-Disposition": f"attachment; filename={filename}"}
         )

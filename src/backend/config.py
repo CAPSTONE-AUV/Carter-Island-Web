@@ -36,8 +36,8 @@ MIN_DETECTIONS_TO_SAVE = int(os.getenv("MIN_DETECTIONS_TO_SAVE", "1"))
 # Use system temp directory instead of local recordings folder
 import tempfile
 RECORDINGS_DIR = tempfile.gettempdir()
-RECORDING_CODEC = os.getenv("RECORDING_CODEC", "mp4v")  # or 'avc1' for H.264
-RECORDING_FPS = int(os.getenv("RECORDING_FPS", "30"))
+# Note: Video format is WebM (VP8/VP9) for browser compatibility
+# FPS is dynamically set based on actual stream FPS to avoid speed issues
 
 # ==========================
 # Model Settings
