@@ -151,10 +151,9 @@ async def stop_recording(client_id: str) -> Optional[dict]:
         recording_info = active_recordings.pop(client_id)
         recording_id = recording_info["recording_id"]
         filepath = recording_info["filepath"]
-        writer = recording_info["writer"]
 
-        # Stop writing
-        writer.release()
+        # Note: Writer is released by detection_track.stop_recording()
+        # Don't release here to avoid double-release
 
         # Get file info (use Jakarta timezone)
         file_size = os.path.getsize(filepath)

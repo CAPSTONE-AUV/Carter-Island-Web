@@ -109,13 +109,14 @@ def setup_routes(app: FastAPI):
         if not is_recording(client_id):
             return {"success": False, "error": "Not recording"}
 
+        # Stop recording on detection track FIRST (releases writer)
+        detection_track = get_detection_track(client_id)
+        if detection_track:
+            detection_track.stop_recording()
+
+        # Then save metadata to database
         recording_data = await stop_recording(client_id)
         if recording_data:
-            # Stop recording on detection track
-            detection_track = get_detection_track(client_id)
-            if detection_track:
-                detection_track.stop_recording()
-
             return {
                 "success": True,
                 "recording": recording_data,
