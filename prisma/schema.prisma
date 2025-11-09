@@ -74,3 +74,24 @@ model DetectionDetail {
 
   @@map("detection_details")
 }
+
+// Model untuk menyimpan rekaman video
+model Recording {
+  id          String   @id @default(cuid())
+  sessionId   String   @map("session_id") // ID sesi streaming
+  filename    String   // Nama file video (e.g., "recording_123.mp4")
+  filepath    String   @db.Text // Path lengkap ke file video
+  fileSize    BigInt   @map("file_size") // Ukuran file dalam bytes
+  duration    Float    // Durasi video dalam detik
+  startTime   DateTime @map("start_time") // Waktu mulai recording
+  endTime     DateTime @map("end_time") // Waktu selesai recording
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  // Index untuk query berdasarkan waktu dan sesi
+  @@index([sessionId], map: "idx_recordings_session_id")
+  @@index([startTime(sort: Desc)], map: "idx_recordings_start_time_desc")
+  @@index([createdAt(sort: Desc)], map: "idx_recordings_created_desc")
+
+  @@map("recordings")
+}
