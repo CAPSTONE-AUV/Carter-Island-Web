@@ -1,6 +1,3 @@
-"""
-Configuration settings for Carter Island Backend
-"""
 import os
 import uuid
 

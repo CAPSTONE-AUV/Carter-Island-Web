@@ -1,7 +1,3 @@
-"""
-Carter Island Backend - Main Entry Point
-GPU-Optimized Real-time Fish Detection with YOLO
-"""
 import logging
 import torch
 from contextlib import asynccontextmanager
@@ -114,7 +110,7 @@ setup_routes(app)
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(
-        "main_new:app",
+        "main:app",
         host="0.0.0.0",
         port=8000,
         log_level="info",

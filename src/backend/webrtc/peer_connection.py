@@ -139,7 +139,9 @@ def get_peer_connections() -> Dict[str, RTCPeerConnection]:
     return peer_connections
 
 
-def get_detection_track(client_id: str) -> RtspDetectionTrack:
+from typing import Optional
+
+def get_detection_track(client_id: str) -> Optional[RtspDetectionTrack]:
     """Get detection track for a client"""
     return detection_tracks.get(client_id)
 

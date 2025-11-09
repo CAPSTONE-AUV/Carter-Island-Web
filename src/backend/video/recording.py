@@ -44,7 +44,7 @@ def create_video_writer(recording_id: str) -> Optional[cv2.VideoWriter]:
         filepath = os.path.join(RECORDINGS_DIR, filename)
 
         # Use H.264 codec for better compatibility
-        fourcc = cv2.VideoWriter_fourcc(*'mp4v')  # or 'avc1' for H.264
+        fourcc = cv2.VideoWriter.fourcc(*'mp4v')  # or 'avc1' for H.264
 
         writer = cv2.VideoWriter(
             filepath,
@@ -86,7 +86,7 @@ async def start_recording(client_id: str, detection_track) -> Optional[str]:
         filepath = os.path.join(RECORDINGS_DIR, filename)
 
         # Create video writer
-        fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+        fourcc = cv2.VideoWriter.fourcc(*'mp4v')
         writer = cv2.VideoWriter(
             filepath,
             fourcc,
