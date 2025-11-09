@@ -56,6 +56,8 @@ class RtspDetectionTrack(VideoStreamTrack):
         # Recording support
         self.recording = False
         self.video_writer: Optional[cv2.VideoWriter] = None
+        self.last_frame_time = None
+        self.target_frame_interval = 1.0 / 30.0  # 30 FPS = 0.0333 seconds per frame
 
     async def recv(self) -> VideoFrame:
         """Receive and process a video frame"""
@@ -122,9 +124,20 @@ class RtspDetectionTrack(VideoStreamTrack):
         cv2.putText(img, f"Device: {device}", (10, 110),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 0, 255), 2)
 
-        # Write to video file if recording
+        # Write to video file if recording with proper frame timing
         if self.recording and self.video_writer is not None:
-            self.video_writer.write(img)
+            current_time = time.time()
+
+            # Initialize timing on first frame
+            if self.last_frame_time is None:
+                self.last_frame_time = current_time
+                self.video_writer.write(img)
+            else:
+                # Only write frame if enough time has passed (30 FPS = ~33ms per frame)
+                time_since_last = current_time - self.last_frame_time
+                if time_since_last >= self.target_frame_interval:
+                    self.video_writer.write(img)
+                    self.last_frame_time = current_time
 
         img = img.astype(np.uint8)
         out = VideoFrame.from_ndarray(img, format="bgr24")
@@ -136,7 +149,8 @@ class RtspDetectionTrack(VideoStreamTrack):
         """Start recording frames to video file"""
         self.recording = True
         self.video_writer = video_writer
-        logger.info("Started recording video frames")
+        self.last_frame_time = None  # Reset frame timing
+        logger.info("Started recording video frames at 30 FPS")
 
     def stop_recording(self):
         """Stop recording frames"""
@@ -144,6 +158,7 @@ class RtspDetectionTrack(VideoStreamTrack):
         if self.video_writer is not None:
             self.video_writer.release()
             self.video_writer = None
+        self.last_frame_time = None  # Reset frame timing
         logger.info("Stopped recording video frames")
 
 

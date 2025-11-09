@@ -25,8 +25,11 @@ active_recordings: Dict[str, dict] = {}
 
 
 def initialize_recordings_dir():
-    os.makedirs(RECORDINGS_DIR, exist_ok=True)
-    logger.info(f"Recordings directory: {RECORDINGS_DIR}")
+    """
+    Deprecated: Recordings directory initialization removed.
+    Using system temp directory instead to avoid local storage.
+    """
+    logger.info(f"Recordings will be stored in system temp directory: {RECORDINGS_DIR}")
 
 
 def create_video_writer(recording_id: str) -> Optional[cv2.VideoWriter]:
