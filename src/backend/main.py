@@ -43,8 +43,7 @@ async def lifespan(app: FastAPI):
     load_custom_model()
     logger.info(f"Device: {get_device_info()}")
 
-    # Initialize recordings directory
-    initialize_recordings_dir()
+    # Recordings directory initialization removed - using system temp directory
 
     # Initialize HTTP client for database operations
     if SAVE_DETECTIONS_ENABLED:

@@ -33,7 +33,9 @@ MIN_DETECTIONS_TO_SAVE = int(os.getenv("MIN_DETECTIONS_TO_SAVE", "1"))
 # ==========================
 # Recording Settings
 # ==========================
-RECORDINGS_DIR = os.getenv("RECORDINGS_DIR", os.path.join(os.path.dirname(__file__), "recordings"))
+# Use system temp directory instead of local recordings folder
+import tempfile
+RECORDINGS_DIR = tempfile.gettempdir()
 RECORDING_CODEC = os.getenv("RECORDING_CODEC", "mp4v")  # or 'avc1' for H.264
 RECORDING_FPS = int(os.getenv("RECORDING_FPS", "30"))
 
