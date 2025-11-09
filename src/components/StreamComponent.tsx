@@ -45,6 +45,10 @@ export default function StreamComponent({
   const [performanceData, setPerformanceData] = useState<PerformanceData | null>(null);
   const [logs, setLogs] = useState<string[]>([]);
 
+  // Recording state
+  const [isRecording, setIsRecording] = useState(false);
+  const [recordingId, setRecordingId] = useState<string | null>(null);
+
   // UI controls
   const [source, setSource] = useState<SourceMode>('server');
   const [profile, setProfile] = useState<Profile>('balanced');
@@ -294,6 +298,12 @@ export default function StreamComponent({
   const stopStream = () => {
     try {
       addLog('Stopping...');
+
+      // Stop recording if active
+      if (isRecording) {
+        stopRecording();
+      }
+
       if (localStreamRef.current) {
         localStreamRef.current.getTracks().forEach(t => t.stop());
         localStreamRef.current = null;
@@ -325,6 +335,60 @@ export default function StreamComponent({
       addLog('Stopped');
     } catch {
       addLog('Stop error');
+    }
+  };
+
+  // Recording functions
+  const startRecording = async () => {
+    if (!isStreaming || !clientId) {
+      addLog('Cannot start recording: Not streaming');
+      return;
+    }
+
+    try {
+      const httpUrl = apiUrl.replace('ws://', 'http://').replace('wss://', 'https://');
+      const response = await fetch(`${httpUrl}/api/recording/start/${clientId}`, {
+        method: 'POST',
+      });
+      const data = await response.json();
+
+      if (data.success) {
+        setIsRecording(true);
+        setRecordingId(data.recording_id);
+        addLog(`Recording started: ${data.recording_id}`);
+      } else {
+        addLog(`Failed to start recording: ${data.error}`);
+      }
+    } catch (e: any) {
+      addLog(`Recording error: ${e?.message || String(e)}`);
+    }
+  };
+
+  const stopRecording = async () => {
+    if (!isRecording || !clientId) {
+      return;
+    }
+
+    try {
+      const httpUrl = apiUrl.replace('ws://', 'http://').replace('wss://', 'https://');
+      const response = await fetch(`${httpUrl}/api/recording/stop/${clientId}`, {
+        method: 'POST',
+      });
+      const data = await response.json();
+
+      if (data.success) {
+        setIsRecording(false);
+        const duration = data.recording?.duration || 0;
+        const fileSize = data.recording?.file_size || 0;
+        addLog(`Recording stopped: ${duration.toFixed(1)}s, ${(fileSize/1024/1024).toFixed(2)}MB`);
+        setRecordingId(null);
+      } else {
+        addLog(`Failed to stop recording: ${data.error}`);
+      }
+    } catch (e: any) {
+      addLog(`Stop recording error: ${e?.message || String(e)}`);
+      setIsRecording(false);
+      setRecordingId(null);
     }
   };
 
@@ -490,6 +554,33 @@ export default function StreamComponent({
               >
                 Stop Stream
               </button>
+
+              {/* Recording Controls */}
+              {isStreaming && (
+                <>
+                  {!isRecording ? (
+                    <button
+                      onClick={startRecording}
+                      className="px-6 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg font-medium text-sm flex items-center gap-2"
+                    >
+                      <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+                        <circle cx="10" cy="10" r="6" />
+                      </svg>
+                      Record
+                    </button>
+                  ) : (
+                    <button
+                      onClick={stopRecording}
+                      className="px-6 py-2 bg-red-800 hover:bg-red-900 text-white rounded-lg font-medium text-sm flex items-center gap-2 animate-pulse"
+                    >
+                      <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+                        <rect x="6" y="6" width="8" height="8" />
+                      </svg>
+                      Stop Recording
+                    </button>
+                  )}
+                </>
+              )}
             </div>
           </div>
         </div>
