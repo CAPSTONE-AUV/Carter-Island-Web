@@ -61,6 +61,7 @@ class RtspDetectionTrack(VideoStreamTrack):
         self.frame_queue: Optional[queue.Queue] = None
         self.writer_thread: Optional[threading.Thread] = None
         self.stop_writer_thread = False
+        self.recording_frame_counter = 0  # Counter for frame decimation
 
     async def recv(self) -> VideoFrame:
         """Receive and process a video frame"""
@@ -128,14 +129,20 @@ class RtspDetectionTrack(VideoStreamTrack):
                     cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 0, 255), 2)
 
         # Add frame to queue for background video writing (non-blocking)
-        # This prevents FPS drop by offloading encoding to background thread
+        # Use frame decimation: only copy and queue every other frame
+        # This reduces expensive img.copy() overhead by 50% while maintaining stream FPS
         if self.recording and self.frame_queue is not None:
-            try:
-                # Use put_nowait to avoid blocking if queue is full
-                # If queue is full, skip this frame to maintain FPS
-                self.frame_queue.put_nowait(img.copy())
-            except queue.Full:
-                pass  # Skip frame if queue is full to maintain performance
+            self.recording_frame_counter += 1
+
+            # Record every 2nd frame (decimation factor = 2)
+            # Stream: 10 FPS, Video: 5 FPS (but video speed is still normal)
+            if self.recording_frame_counter % 2 == 0:
+                try:
+                    # Copy and queue frame (non-blocking)
+                    # img.copy() is expensive (~2-5ms for 1280x720x3 image)
+                    self.frame_queue.put_nowait(img.copy())
+                except queue.Full:
+                    pass  # Skip frame if queue is full to maintain performance
 
         img = img.astype(np.uint8)
         out = VideoFrame.from_ndarray(img, format="bgr24")
@@ -169,6 +176,7 @@ class RtspDetectionTrack(VideoStreamTrack):
         self.recording = True
         self.video_writer = video_writer
         self.stop_writer_thread = False
+        self.recording_frame_counter = 0  # Reset counter
 
         # Create queue for frames (max 30 frames buffered)
         self.frame_queue = queue.Queue(maxsize=30)
@@ -177,7 +185,7 @@ class RtspDetectionTrack(VideoStreamTrack):
         self.writer_thread = threading.Thread(target=self._video_writer_thread, daemon=True)
         self.writer_thread.start()
 
-        logger.info(f"Started recording with background thread (non-blocking)")
+        logger.info(f"Started recording with background thread and frame decimation (non-blocking)")
 
     def stop_recording(self):
         """Stop recording frames and cleanup background thread"""

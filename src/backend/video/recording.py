@@ -82,12 +82,16 @@ async def start_recording(client_id: str, detection_track) -> Optional[str]:
         filename = f"recording_{recording_id}.webm"
         filepath = os.path.join(RECORDINGS_DIR, filename)
 
-        # Get actual stream FPS to avoid speed issues
+        # Get actual stream FPS and divide by 2 for frame decimation
+        # We only record every 2nd frame to reduce copy overhead
         actual_fps = get_fps()
         if actual_fps <= 0:
             actual_fps = 10.0  # Default to 10 FPS if not yet calculated
 
-        logger.info(f"Recording at {actual_fps:.1f} FPS (actual stream rate)")
+        # Use half FPS for recording (frame decimation factor = 2)
+        recording_fps = actual_fps / 2.0
+
+        logger.info(f"Recording at {recording_fps:.1f} FPS (stream: {actual_fps:.1f} FPS, decimation: 2x)")
 
         # Create video writer with WebM format (VP8 codec) for browser compatibility
         # WebM is natively supported by all modern browsers
@@ -101,11 +105,11 @@ async def start_recording(client_id: str, detection_track) -> Optional[str]:
             writer = cv2.VideoWriter(
                 filepath,
                 fourcc,
-                actual_fps,  # Use actual stream FPS, not hardcoded 30
+                recording_fps,  # Use decimated FPS (half of stream FPS)
                 (RESIZE_WIDTH, RESIZE_HEIGHT)
             )
             if writer.isOpened():
-                logger.info(f"Using codec: {fourcc} at {actual_fps:.1f} FPS")
+                logger.info(f"Using codec: {fourcc} at {recording_fps:.1f} FPS")
                 break
             writer.release()
             writer = None
