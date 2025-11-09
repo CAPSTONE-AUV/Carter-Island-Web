@@ -2,9 +2,11 @@
 FastAPI routes for Carter Island Backend
 """
 import json
+import os
 import torch
 import logging
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
+from fastapi.responses import FileResponse, StreamingResponse
 from typing import Set
 
 from models.yolo_detector import get_model, get_model_info
@@ -131,6 +133,49 @@ def setup_routes(app: FastAPI):
             "recording": recording,
             "info": info
         }
+
+    @app.get("/api/video/stream/{filename}")
+    async def stream_video(filename: str):
+        """Stream video file for playback"""
+        from config import RECORDINGS_DIR
+
+        # Security: prevent directory traversal
+        if ".." in filename or "/" in filename or "\\" in filename:
+            raise HTTPException(status_code=400, detail="Invalid filename")
+
+        filepath = os.path.join(RECORDINGS_DIR, filename)
+
+        if not os.path.exists(filepath):
+            raise HTTPException(status_code=404, detail="Video not found")
+
+        # Return video file with proper content type
+        return FileResponse(
+            filepath,
+            media_type="video/mp4",
+            filename=filename
+        )
+
+    @app.get("/api/video/download/{filename}")
+    async def download_video(filename: str):
+        """Download video file"""
+        from config import RECORDINGS_DIR
+
+        # Security: prevent directory traversal
+        if ".." in filename or "/" in filename or "\\" in filename:
+            raise HTTPException(status_code=400, detail="Invalid filename")
+
+        filepath = os.path.join(RECORDINGS_DIR, filename)
+
+        if not os.path.exists(filepath):
+            raise HTTPException(status_code=404, detail="Video not found")
+
+        # Force download with proper headers
+        return FileResponse(
+            filepath,
+            media_type="video/mp4",
+            filename=filename,
+            headers={"Content-Disposition": f"attachment; filename={filename}"}
+        )
 
     @app.websocket("/ws/{client_id}")
     async def websocket_endpoint(websocket: WebSocket, client_id: str):

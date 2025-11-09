@@ -2,6 +2,7 @@
 
 import { Button } from '@/components/ui/button';
 import { useState } from 'react';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 
 interface Recording {
   id: string;
@@ -46,6 +47,8 @@ function formatDate(date: Date): string {
 
 export default function RecordingsTable({ recordings }: RecordingsTableProps) {
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [playingVideo, setPlayingVideo] = useState<string | null>(null);
+  const [isDialogOpen, setIsDialogOpen] = useState(false);
 
   const handleDelete = async (id: string, filename: string) => {
     if (!confirm(`Delete ${filename}?`)) {
@@ -71,8 +74,23 @@ export default function RecordingsTable({ recordings }: RecordingsTableProps) {
     }
   };
 
+  const handlePlay = (filename: string) => {
+    setPlayingVideo(filename);
+    setIsDialogOpen(true);
+  };
+
   const handleDownload = (filename: string) => {
-    window.alert('Download functionality coming soon');
+    // Download from Python backend
+    const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000';
+    const downloadUrl = `${backendUrl}/api/video/download/${filename}`;
+
+    // Open in new tab to trigger download
+    window.open(downloadUrl, '_blank');
+  };
+
+  const handleCloseDialog = () => {
+    setIsDialogOpen(false);
+    setPlayingVideo(null);
   };
 
   if (recordings.length === 0) {
@@ -100,9 +118,12 @@ export default function RecordingsTable({ recordings }: RecordingsTableProps) {
     );
   }
 
+  const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000';
+
   return (
-    <div className="overflow-x-auto">
-      <table className="min-w-full divide-y divide-gray-200">
+    <>
+      <div className="overflow-x-auto">
+        <table className="min-w-full divide-y divide-gray-200">
         <thead className="bg-gray-50">
           <tr>
             <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
@@ -144,7 +165,10 @@ export default function RecordingsTable({ recordings }: RecordingsTableProps) {
                 {recording.sessionId.substring(0, 8)}...
               </td>
               <td className="px-6 py-4 whitespace-nowrap text-sm font-medium space-x-2">
-                <Button size="sm" disabled title="Video playback coming soon">
+                <Button
+                  size="sm"
+                  onClick={() => handlePlay(recording.filename)}
+                >
                   Play
                 </Button>
                 <Button
@@ -168,5 +192,27 @@ export default function RecordingsTable({ recordings }: RecordingsTableProps) {
         </tbody>
       </table>
     </div>
+
+    {/* Video Player Dialog */}
+    <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
+      <DialogContent className="max-w-4xl">
+        <DialogHeader>
+          <DialogTitle>Video Playback - {playingVideo}</DialogTitle>
+        </DialogHeader>
+        <div className="mt-4">
+          {playingVideo && (
+            <video
+              controls
+              autoPlay
+              className="w-full rounded-lg"
+              src={`${backendUrl}/api/video/stream/${playingVideo}`}
+            >
+              Your browser does not support the video tag.
+            </video>
+          )}
+        </div>
+      </DialogContent>
+    </Dialog>
+  </>
   );
 }

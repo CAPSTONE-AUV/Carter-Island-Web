@@ -7,6 +7,7 @@ import logging
 import httpx
 from typing import Optional, Dict
 from datetime import datetime
+import pytz
 from config import (
     RECORDINGS_DIR,
     RECORDING_CODEC,
@@ -16,6 +17,9 @@ from config import (
     API_BASE_URL,
     streaming_session_id
 )
+
+# Jakarta timezone
+JAKARTA_TZ = pytz.timezone('Asia/Jakarta')
 
 logger = logging.getLogger("carter-backend")
 
@@ -101,13 +105,13 @@ async def start_recording(client_id: str, detection_track) -> Optional[str]:
         # Start recording on detection track
         detection_track.start_recording(writer)
 
-        # Store recording info
+        # Store recording info (use Jakarta timezone)
         active_recordings[client_id] = {
             "recording_id": recording_id,
             "filename": filename,
             "filepath": filepath,
             "writer": writer,
-            "start_time": datetime.now(),
+            "start_time": datetime.now(JAKARTA_TZ),
             "session_id": streaming_session_id
         }
 
@@ -142,9 +146,9 @@ async def stop_recording(client_id: str) -> Optional[dict]:
         # Stop writing
         writer.release()
 
-        # Get file info
+        # Get file info (use Jakarta timezone)
         file_size = os.path.getsize(filepath)
-        end_time = datetime.now()
+        end_time = datetime.now(JAKARTA_TZ)
         duration = (end_time - recording_info["start_time"]).total_seconds()
 
         recording_data = {
@@ -171,8 +175,8 @@ async def stop_recording(client_id: str) -> Optional[dict]:
                         "filepath": filepath,
                         "fileSize": file_size,
                         "duration": duration,
-                        "startTime": recording_info["start_time"].isoformat() + "Z",
-                        "endTime": end_time.isoformat() + "Z"
+                        "startTime": recording_info["start_time"].isoformat(),
+                        "endTime": end_time.isoformat()
                     },
                     timeout=5.0
                 )
