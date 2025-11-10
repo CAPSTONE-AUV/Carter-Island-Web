@@ -91,6 +91,26 @@ export default function DashboardContent({
     return () => clearInterval(interval);
   }, []);
 
+  // Background polling: Check MediaMTX player health every 5 seconds
+  // This updates AUV status based on whether http://192.168.2.2:8889/cam/ is accessible
+  useEffect(() => {
+    const pollMediaMTX = async () => {
+      try {
+        await fetch('/api/mediamtx/health');
+      } catch (error) {
+        console.error('Failed to poll MediaMTX health:', error);
+      }
+    };
+
+    // Poll immediately on mount
+    pollMediaMTX();
+
+    // Then poll every 5 seconds
+    const interval = setInterval(pollMediaMTX, 5000);
+
+    return () => clearInterval(interval);
+  }, []);
+
   const telemetry = telemetryData?.data;
   const auvStatus = auvData?.data;
 
