@@ -1,0 +1,441 @@
+'use client';
+
+import useSWR from 'swr';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import {
+  Activity,
+  Wifi,
+  Clock,
+  MapPin,
+  Camera,
+  Fish,
+  TrendingUp,
+  Gauge,
+  Battery,
+} from 'lucide-react';
+import MapButton from '@/components/ui/MapButton';
+import { useEffect } from 'react';
+
+// Fetcher function untuk SWR
+const fetcher = (url: string) => fetch(url).then((res) => res.json());
+
+// Format uptime dari detik ke format human-readable
+function formatUptime(seconds: number): string {
+  const hours = Math.floor(seconds / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  return `${hours}h ${minutes}m`;
+}
+
+// Get connection color based on strength
+function getConnectionColor(strength: string) {
+  switch (strength.toLowerCase()) {
+    case 'strong':
+      return { bg: 'bg-green-100', text: 'text-green-600' };
+    case 'moderate':
+      return { bg: 'bg-yellow-100', text: 'text-yellow-600' };
+    case 'weak':
+      return { bg: 'bg-red-100', text: 'text-red-600' };
+    default:
+      return { bg: 'bg-gray-100', text: 'text-gray-600' };
+  }
+}
+
+interface DashboardContentProps {
+  userFullName: string;
+  userRole: string;
+}
+
+export default function DashboardContent({
+  userFullName,
+  userRole,
+}: DashboardContentProps) {
+  // Fetch latest telemetry data dengan auto-refresh setiap 2 detik
+  const { data: telemetryData, error: telemetryError } = useSWR(
+    '/api/telemetry/latest',
+    fetcher,
+    {
+      refreshInterval: 2000, // Auto-refresh every 2 seconds
+      revalidateOnFocus: true,
+      revalidateOnReconnect: true,
+    }
+  );
+
+  // Fetch latest AUV status dengan auto-refresh setiap 3 detik
+  const { data: auvData, error: auvError } = useSWR(
+    '/api/auv-status/latest',
+    fetcher,
+    {
+      refreshInterval: 3000, // Auto-refresh every 3 seconds
+      revalidateOnFocus: true,
+      revalidateOnReconnect: true,
+    }
+  );
+
+  // Background polling: Fetch telemetry from Raspberry Pi every 5 seconds
+  useEffect(() => {
+    const pollTelemetry = async () => {
+      try {
+        await fetch('/api/telemetry/fetch');
+      } catch (error) {
+        console.error('Failed to poll telemetry:', error);
+      }
+    };
+
+    // Poll immediately on mount
+    pollTelemetry();
+
+    // Then poll every 5 seconds
+    const interval = setInterval(pollTelemetry, 5000);
+
+    return () => clearInterval(interval);
+  }, []);
+
+  const telemetry = telemetryData?.data;
+  const auvStatus = auvData?.data;
+
+  // Determine if data is loading or has errors
+  const isLoading = !telemetry && !auvStatus && !telemetryError && !auvError;
+
+  // Connection color
+  const connectionColor = auvStatus
+    ? getConnectionColor(auvStatus.connectionStrength)
+    : { bg: 'bg-blue-100', text: 'text-blue-600' };
+
+  return (
+    <>
+      {/* Stats Cards */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
+        {/* AUV Status */}
+        <Card className="border-0 shadow-sm">
+          <CardContent className="px-6 py-2">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm font-medium text-gray-600">AUV Status</p>
+                <p className="text-2xl font-semibold text-gray-900">
+                  {isLoading
+                    ? 'Loading...'
+                    : auvStatus?.isOnline
+                    ? 'Online'
+                    : 'Offline'}
+                </p>
+              </div>
+              <div
+                className={`w-12 h-12 ${
+                  auvStatus?.isOnline ? 'bg-green-100' : 'bg-gray-100'
+                } rounded-xl flex items-center justify-center`}
+              >
+                <Activity
+                  className={`w-6 h-6 ${
+                    auvStatus?.isOnline ? 'text-green-600' : 'text-gray-600'
+                  }`}
+                />
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Connection */}
+        <Card className="border-0 shadow-sm">
+          <CardContent className="px-6 py-2">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm font-medium text-gray-600">Connection</p>
+                <p className="text-2xl font-semibold text-gray-900">
+                  {isLoading
+                    ? 'Loading...'
+                    : auvStatus?.connectionStrength || 'Unknown'}
+                </p>
+              </div>
+              <div
+                className={`w-12 h-12 ${connectionColor.bg} rounded-xl flex items-center justify-center`}
+              >
+                <Wifi className={`w-6 h-6 ${connectionColor.text}`} />
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Uptime */}
+        <Card className="border-0 shadow-sm">
+          <CardContent className="px-6 py-2">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm font-medium text-gray-600">Uptime</p>
+                <p className="text-2xl font-semibold text-gray-900">
+                  {isLoading
+                    ? 'Loading...'
+                    : auvStatus
+                    ? formatUptime(auvStatus.uptimeSeconds)
+                    : '0h 0m'}
+                </p>
+              </div>
+              <div className="w-12 h-12 bg-amber-100 rounded-xl flex items-center justify-center">
+                <Clock className="w-6 h-6 text-amber-600" />
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Location */}
+        <Card className="border-0 shadow-sm">
+          <CardContent className="px-6 py-2">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm font-medium text-gray-600">Location</p>
+                <p className="text-2xl font-semibold text-gray-900">
+                  {isLoading
+                    ? 'Loading...'
+                    : auvStatus?.locationStatus || 'Active'}
+                </p>
+              </div>
+              <div className="w-12 h-12 bg-purple-100 rounded-xl flex items-center justify-center">
+                <MapPin className="w-6 h-6 text-purple-600" />
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+        {/* Telemetry Data */}
+        <Card className="lg:col-span-2 border-0 shadow-sm">
+          <CardHeader className="pb-4">
+            <CardTitle className="flex items-center gap-2 text-lg">
+              <Activity className="h-5 w-5 text-blue-600" />
+              Live Telemetry
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              {/* Compass */}
+              <div className="p-4 bg-gradient-to-br from-blue-50 to-blue-100 rounded-xl border border-blue-200">
+                <div className="flex items-center gap-2 mb-2">
+                  <Gauge className="h-5 w-5 text-blue-600" />
+                  <h3 className="font-semibold text-gray-900">Compass</h3>
+                </div>
+                <div className="space-y-1">
+                  <div className="flex justify-between">
+                    <span className="text-sm text-gray-600">Heading</span>
+                    <span className="font-bold text-xl text-blue-600">
+                      {telemetry
+                        ? `${Math.abs(telemetry.yawDeg).toFixed(1)}°`
+                        : '--'}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Battery */}
+              <div className="p-4 bg-gradient-to-br from-green-50 to-green-100 rounded-xl border border-green-200">
+                <div className="flex items-center gap-2 mb-2">
+                  <Battery className="h-5 w-5 text-green-600" />
+                  <h3 className="font-semibold text-gray-900">Battery</h3>
+                </div>
+                <div className="space-y-1 text-sm">
+                  <div className="flex justify-between">
+                    <span className="text-gray-600">Level</span>
+                    <span className="font-semibold text-green-600">
+                      {telemetry
+                        ? `${telemetry.remainingPercent.toFixed(0)}%`
+                        : '--'}
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-gray-600">Voltage</span>
+                    <span className="font-medium">
+                      {telemetry ? `${telemetry.voltageV.toFixed(2)}V` : '--'}
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-gray-600">Current</span>
+                    <span className="font-medium">
+                      {telemetry ? `${telemetry.currentA.toFixed(2)}A` : '--'}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Health Status */}
+              <div className="p-4 bg-gradient-to-br from-purple-50 to-purple-100 rounded-xl border border-purple-200">
+                <div className="flex items-center gap-2 mb-2">
+                  <Activity className="h-5 w-5 text-purple-600" />
+                  <h3 className="font-semibold text-gray-900">Health</h3>
+                </div>
+                <div className="space-y-1 text-sm">
+                  <div className="flex justify-between items-center">
+                    <span className="text-gray-600">Gyroscope</span>
+                    <span
+                      className={`px-2 py-0.5 rounded-full text-xs font-medium ${
+                        telemetry?.gyroOk
+                          ? 'bg-green-200 text-green-800'
+                          : 'bg-red-200 text-red-800'
+                      }`}
+                    >
+                      {telemetry ? (telemetry.gyroOk ? 'OK' : 'Error') : '--'}
+                    </span>
+                  </div>
+                  <div className="flex justify-between items-center">
+                    <span className="text-gray-600">Accelerometer</span>
+                    <span
+                      className={`px-2 py-0.5 rounded-full text-xs font-medium ${
+                        telemetry?.accelOk
+                          ? 'bg-green-200 text-green-800'
+                          : 'bg-red-200 text-red-800'
+                      }`}
+                    >
+                      {telemetry
+                        ? telemetry.accelOk
+                          ? 'OK'
+                          : 'Error'
+                        : '--'}
+                    </span>
+                  </div>
+                  <div className="flex justify-between items-center">
+                    <span className="text-gray-600">Magnetometer</span>
+                    <span
+                      className={`px-2 py-0.5 rounded-full text-xs font-medium ${
+                        telemetry?.magOk
+                          ? 'bg-green-200 text-green-800'
+                          : 'bg-red-200 text-red-800'
+                      }`}
+                    >
+                      {telemetry ? (telemetry.magOk ? 'OK' : 'Error') : '--'}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Quick Actions */}
+            <div className="mt-6">
+              <h3 className="font-semibold text-gray-900 mb-3">
+                Quick Actions
+              </h3>
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                <Button className="h-16 flex-col gap-2" variant="default">
+                  <Activity size={20} />
+                  <span className="text-sm">Start Mission</span>
+                </Button>
+                <Button variant="outline" className="h-16 flex-col gap-2">
+                  <Camera size={20} />
+                  <span className="text-sm">Live Stream</span>
+                </Button>
+                <Button variant="outline" className="h-16 flex-col gap-2">
+                  <Clock size={20} />
+                  <span className="text-sm">View Logs</span>
+                </Button>
+                <Button variant="outline" className="h-16 flex-col gap-2">
+                  <MapPin size={20} />
+                  <span className="text-sm">Navigation</span>
+                </Button>
+                {userRole === 'ADMIN' && (
+                  <>
+                    <Button
+                      variant="outline"
+                      className="h-16 flex-col gap-2 border-red-200 text-red-600 hover:bg-red-50"
+                    >
+                      <TrendingUp size={20} />
+                      <span className="text-sm">System</span>
+                    </Button>
+                    <Button variant="outline" className="h-16 flex-col gap-2">
+                      <Activity size={20} />
+                      <span className="text-sm">Settings</span>
+                    </Button>
+                  </>
+                )}
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* AUV Location Map */}
+        <Card className="border-0 shadow-sm">
+          <CardHeader className="pb-0">
+            <CardTitle className="flex items-center gap-2 text-lg">
+              <MapPin className="h-5 w-5 text-purple-600" />
+              AUV Detail Location
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-4">
+              {/* Real Google Maps Embed with Custom Marker Overlay */}
+              <div className="w-full h-48 rounded-xl overflow-hidden border border-gray-200 relative">
+                <iframe
+                  src="https://www.google.com/maps/embed?pb=!1m14!1m12!1m3!1d3961.785!2d110.63642!3d-6.62177!2m3!1f0!2f0!3f0!3m2!1i1024!2i768!4f15.1!5e0!3m2!1sen!2sid!4v1699123456789!5m2!1sen!2sid"
+                  width="100%"
+                  height="100%"
+                  style={{ border: 0 }}
+                  allowFullScreen
+                  loading="lazy"
+                  referrerPolicy="no-referrer-when-downgrade"
+                  className="rounded-xl"
+                />
+
+                {/* Custom Animated AUV Marker - positioned over the map */}
+                <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 z-10">
+                  <div className="relative flex items-center justify-center">
+                    {/* Pulsing ring animation */}
+                    <div className="absolute w-6 h-6 bg-red-500 rounded-full animate-ping opacity-75"></div>
+                    <div className="absolute w-4 h-4 bg-red-500 rounded-full animate-pulse"></div>
+                    {/* Center dot */}
+                    <div className="relative w-2 h-2 bg-red-600 rounded-full"></div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Location Details - Using telemetry data */}
+              <div className="grid grid-cols-2 gap-4 text-sm">
+                <div className="space-y-2">
+                  <div className="flex justify-between">
+                    <span className="text-gray-600">Depth</span>
+                    <span className="font-medium text-gray-900">15.2m</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-gray-600">Speed</span>
+                    <span className="font-medium text-gray-900">2.3 kts</span>
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  <div className="flex justify-between">
+                    <span className="text-gray-600">Heading</span>
+                    <span className="font-medium text-gray-900">
+                      {telemetry
+                        ? `${Math.abs(telemetry.yawDeg).toFixed(0)}°`
+                        : '--'}
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-gray-600">Battery</span>
+                    <span
+                      className={`font-medium ${
+                        telemetry && telemetry.remainingPercent > 50
+                          ? 'text-green-600'
+                          : telemetry && telemetry.remainingPercent > 20
+                          ? 'text-yellow-600'
+                          : 'text-red-600'
+                      }`}
+                    >
+                      {telemetry
+                        ? `${telemetry.remainingPercent.toFixed(0)}%`
+                        : '--'}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Action Button - Opens Google Maps in new tab */}
+              <MapButton
+                lat={-6.621770076466091}
+                lng={110.64180349373554}
+                className="w-full"
+              >
+                View Full Map
+              </MapButton>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    </>
+  );
+}
