@@ -1,6 +1,11 @@
 'use client';
 
 import { useEffect, useRef, useState, useCallback } from 'react';
+import {
+  updateStreamConnected,
+  updateStreamDisconnected,
+  updateStreamPerformance,
+} from '@/lib/auv-status';
 
 interface StreamComponentProps {
   /** contoh: ws://localhost:8000 */
@@ -44,6 +49,7 @@ export default function StreamComponent({
   const [modelInfo, setModelInfo] = useState<ModelInfo | null>(null);
   const [performanceData, setPerformanceData] = useState<PerformanceData | null>(null);
   const [logs, setLogs] = useState<string[]>([]);
+  const [streamStartTime, setStreamStartTime] = useState<Date | null>(null);
 
   // Recording state
   const [isRecording, setIsRecording] = useState(false);
@@ -113,6 +119,25 @@ export default function StreamComponent({
       if (perfIntervalRef.current) clearInterval(perfIntervalRef.current);
     };
   }, [apiUrl, isStreaming, isClient]);
+
+  // --- AUV Status updates based on performance ---
+  useEffect(() => {
+    if (!isClient || !isStreaming || !streamStartTime) return;
+
+    // Update AUV status every 5 seconds with current performance metrics
+    const updateStatus = async () => {
+      const fps = performanceData?.fps || 0;
+      await updateStreamPerformance(streamStartTime, fps, targetFps);
+    };
+
+    // Initial update
+    updateStatus();
+
+    // Then update every 5 seconds
+    const interval = setInterval(updateStatus, 5000);
+
+    return () => clearInterval(interval);
+  }, [isClient, isStreaming, streamStartTime, performanceData, targetFps]);
 
   // --- WebRTC bootstrap ---
   const initializeWebRTC = async () => {
@@ -288,8 +313,16 @@ export default function StreamComponent({
     try {
       if (source === 'server') await startServerStream();
       else await startDeviceStream();
+
+      const startTime = new Date();
       setIsStreaming(true);
+      setStreamStartTime(startTime);
       addLog('Stream started');
+
+      // Update AUV status to online
+      updateStreamConnected(startTime).catch(err => {
+        console.error('Failed to update AUV status on stream start:', err);
+      });
     } catch (e: any) {
       addLog(`Start failed: ${e?.message || String(e)}`);
     }
@@ -332,7 +365,13 @@ export default function StreamComponent({
       setIsStreaming(false);
       setConnectionStatus('disconnected');
       setPerformanceData(null);
+      setStreamStartTime(null);
       addLog('Stopped');
+
+      // Update AUV status to offline
+      updateStreamDisconnected().catch(err => {
+        console.error('Failed to update AUV status on stream stop:', err);
+      });
     } catch {
       addLog('Stop error');
     }
