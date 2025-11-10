@@ -72,41 +72,22 @@ export default function DashboardContent({
     }
   );
 
-  // Background polling: Fetch telemetry from Raspberry Pi every 5 seconds
+  // Background polling: Comprehensive health check every 5 seconds
+  // This checks both MediaMTX player accessibility and telemetry data changes
   useEffect(() => {
-    const pollTelemetry = async () => {
+    const pollHealth = async () => {
       try {
-        await fetch('/api/telemetry/fetch');
+        await fetch('/api/health/check');
       } catch (error) {
-        console.error('Failed to poll telemetry:', error);
+        console.error('Failed to poll health check:', error);
       }
     };
 
     // Poll immediately on mount
-    pollTelemetry();
+    pollHealth();
 
     // Then poll every 5 seconds
-    const interval = setInterval(pollTelemetry, 5000);
-
-    return () => clearInterval(interval);
-  }, []);
-
-  // Background polling: Check MediaMTX player health every 5 seconds
-  // This updates AUV status based on whether http://192.168.2.2:8889/cam/ is accessible
-  useEffect(() => {
-    const pollMediaMTX = async () => {
-      try {
-        await fetch('/api/mediamtx/health');
-      } catch (error) {
-        console.error('Failed to poll MediaMTX health:', error);
-      }
-    };
-
-    // Poll immediately on mount
-    pollMediaMTX();
-
-    // Then poll every 5 seconds
-    const interval = setInterval(pollMediaMTX, 5000);
+    const interval = setInterval(pollHealth, 5000);
 
     return () => clearInterval(interval);
   }, []);
@@ -227,20 +208,46 @@ export default function DashboardContent({
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              {/* Compass */}
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+              {/* Attitude */}
               <div className="p-4 bg-gradient-to-br from-blue-50 to-blue-100 rounded-xl border border-blue-200">
                 <div className="flex items-center gap-2 mb-2">
                   <Gauge className="h-5 w-5 text-blue-600" />
+                  <h3 className="font-semibold text-gray-900">Attitude</h3>
+                </div>
+                <div className="space-y-1 text-sm">
+                  <div className="flex justify-between">
+                    <span className="text-gray-600">Roll</span>
+                    <span className="font-medium">
+                      {telemetry ? `${telemetry.rollDeg.toFixed(1)}°` : '--'}
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-gray-600">Pitch</span>
+                    <span className="font-medium">
+                      {telemetry ? `${telemetry.pitchDeg.toFixed(1)}°` : '--'}
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-gray-600">Yaw</span>
+                    <span className="font-medium">
+                      {telemetry ? `${telemetry.yawDeg.toFixed(1)}°` : '--'}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Compass */}
+              <div className="p-4 bg-gradient-to-br from-indigo-50 to-indigo-100 rounded-xl border border-indigo-200">
+                <div className="flex items-center gap-2 mb-2">
+                  <MapPin className="h-5 w-5 text-indigo-600" />
                   <h3 className="font-semibold text-gray-900">Compass</h3>
                 </div>
                 <div className="space-y-1">
                   <div className="flex justify-between">
                     <span className="text-sm text-gray-600">Heading</span>
-                    <span className="font-bold text-xl text-blue-600">
-                      {telemetry
-                        ? `${Math.abs(telemetry.yawDeg).toFixed(1)}°`
-                        : '--'}
+                    <span className="font-bold text-2xl text-indigo-600">
+                      {telemetry ? `${telemetry.headingDeg.toFixed(1)}°` : '--'}
                     </span>
                   </div>
                 </div>
@@ -270,7 +277,9 @@ export default function DashboardContent({
                   <div className="flex justify-between">
                     <span className="text-gray-600">Current</span>
                     <span className="font-medium">
-                      {telemetry ? `${telemetry.currentA.toFixed(2)}A` : '--'}
+                      {telemetry && telemetry.currentA !== null
+                        ? `${telemetry.currentA.toFixed(2)}A`
+                        : '--'}
                     </span>
                   </div>
                 </div>
@@ -287,27 +296,27 @@ export default function DashboardContent({
                     <span className="text-gray-600">Gyroscope</span>
                     <span
                       className={`px-2 py-0.5 rounded-full text-xs font-medium ${
-                        telemetry?.gyroOk
+                        telemetry?.gyroCal
                           ? 'bg-green-200 text-green-800'
                           : 'bg-red-200 text-red-800'
                       }`}
                     >
-                      {telemetry ? (telemetry.gyroOk ? 'OK' : 'Error') : '--'}
+                      {telemetry ? (telemetry.gyroCal ? 'CAL' : 'UNCAL') : '--'}
                     </span>
                   </div>
                   <div className="flex justify-between items-center">
                     <span className="text-gray-600">Accelerometer</span>
                     <span
                       className={`px-2 py-0.5 rounded-full text-xs font-medium ${
-                        telemetry?.accelOk
+                        telemetry?.accelCal
                           ? 'bg-green-200 text-green-800'
                           : 'bg-red-200 text-red-800'
                       }`}
                     >
                       {telemetry
-                        ? telemetry.accelOk
-                          ? 'OK'
-                          : 'Error'
+                        ? telemetry.accelCal
+                          ? 'CAL'
+                          : 'UNCAL'
                         : '--'}
                     </span>
                   </div>
@@ -315,12 +324,12 @@ export default function DashboardContent({
                     <span className="text-gray-600">Magnetometer</span>
                     <span
                       className={`px-2 py-0.5 rounded-full text-xs font-medium ${
-                        telemetry?.magOk
+                        telemetry?.magCal
                           ? 'bg-green-200 text-green-800'
                           : 'bg-red-200 text-red-800'
                       }`}
                     >
-                      {telemetry ? (telemetry.magOk ? 'OK' : 'Error') : '--'}
+                      {telemetry ? (telemetry.magCal ? 'CAL' : 'UNCAL') : '--'}
                     </span>
                   </div>
                 </div>
@@ -421,7 +430,7 @@ export default function DashboardContent({
                     <span className="text-gray-600">Heading</span>
                     <span className="font-medium text-gray-900">
                       {telemetry
-                        ? `${Math.abs(telemetry.yawDeg).toFixed(0)}°`
+                        ? `${telemetry.headingDeg.toFixed(0)}°`
                         : '--'}
                     </span>
                   </div>
