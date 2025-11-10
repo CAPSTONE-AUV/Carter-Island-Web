@@ -95,3 +95,45 @@ model Recording {
 
   @@map("recordings")
 }
+
+// Model untuk menyimpan data telemetry dari AUV
+model Telemetry {
+  id               String   @id @default(cuid())
+  // Compass data
+  yawDeg           Float    @map("yaw_deg") // Heading dalam derajat
+  // Battery data
+  voltageV         Float    @map("voltage_v") // Voltage dalam Volt
+  currentA         Float    @map("current_a") // Current dalam Ampere
+  remainingPercent Float    @map("remaining_percent") // Battery remaining dalam persen
+  // Health status
+  gyroOk           Boolean  @map("gyro_ok") // Status gyroscope
+  accelOk          Boolean  @map("accel_ok") // Status accelerometer
+  magOk            Boolean  @map("mag_ok") // Status magnetometer
+  // Metadata
+  timestamp        DateTime @default(now()) // Waktu data diterima
+  createdAt        DateTime @default(now()) @map("created_at")
+
+  // Index untuk query data terbaru
+  @@index([timestamp(sort: Desc)], map: "idx_telemetry_timestamp_desc")
+  @@index([createdAt(sort: Desc)], map: "idx_telemetry_created_desc")
+
+  @@map("telemetry")
+}
+
+// Model untuk menyimpan status AUV dan connection
+model AUVStatus {
+  id                String   @id @default(cuid())
+  isOnline          Boolean  @map("is_online") // Status online berdasarkan RTSP connection
+  connectionStrength String  @map("connection_strength") // Strong/Moderate/Weak berdasarkan RTSP
+  uptimeSeconds     Int      @map("uptime_seconds") // Uptime dalam detik
+  locationStatus    String   @default("Active") @map("location_status") // Static: "Active"
+  lastStreamTime    DateTime? @map("last_stream_time") // Waktu terakhir RTSP stream aktif
+  timestamp         DateTime @default(now()) // Waktu data diterima
+  createdAt         DateTime @default(now()) @map("created_at")
+
+  // Index untuk query data terbaru
+  @@index([timestamp(sort: Desc)], map: "idx_auv_status_timestamp_desc")
+  @@index([createdAt(sort: Desc)], map: "idx_auv_status_created_desc")
+
+  @@map("auv_status")
+}
