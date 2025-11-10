@@ -1,21 +1,7 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 
-const MEDIAMTX_PLAYER_URL = 'http://192.168.2.2:8889/cam/';
 const RASPI_TELEMETRY_URL = 'http://192.168.2.2:14552/telemetry';
-
-/**
- * Calculate connection strength based on response time
- */
-function calculateConnectionStrength(responseTimeMs: number): string {
-  if (responseTimeMs < 500) {
-    return 'Strong';
-  } else if (responseTimeMs < 1500) {
-    return 'Moderate';
-  } else {
-    return 'Weak';
-  }
-}
 
 /**
  * Calculate uptime in seconds from first connected time
@@ -30,55 +16,45 @@ function calculateUptime(firstConnectedTime: Date | null): number {
 
 /**
  * Check if telemetry data has changed from previous reading
- * Compares attitude and compass values
+ * Compares attitude, compass, battery, and health values
  */
-function isTelemetryDataChanging(
-  current: any,
-  previous: any
-): boolean {
+function isTelemetryDataChanging(current: any, previous: any): boolean {
   if (!previous) return true; // First time, consider as changing
 
-  // Compare critical values (attitude and compass)
+  // Compare attitude values
   const attitudeChanged =
     current.attitude.roll_deg !== previous.rollDeg ||
     current.attitude.pitch_deg !== previous.pitchDeg ||
     current.attitude.yaw_deg !== previous.yawDeg;
 
-  const compassChanged =
-    current.compass.heading_deg !== previous.headingDeg;
+  // Compare compass values
+  const compassChanged = current.compass.heading_deg !== previous.headingDeg;
 
-  return attitudeChanged || compassChanged;
+  // Compare battery values
+  const batteryChanged =
+    current.battery.voltage_v !== previous.voltageV ||
+    current.battery.remaining_percent !== previous.remainingPercent;
+
+  // Compare health calibration status
+  const healthChanged =
+    current.health.gyro_cal !== previous.gyroCal ||
+    current.health.accel_cal !== previous.accelCal ||
+    current.health.mag_cal !== previous.magCal;
+
+  return attitudeChanged || compassChanged || batteryChanged || healthChanged;
 }
 
 /**
  * GET /api/health/check
- * Comprehensive health check:
- * 1. Check MediaMTX player accessibility
- * 2. Fetch and check if telemetry data is changing
- * 3. Update AUV status based on both conditions
+ * Check AUV health based on telemetry data changes only
+ * AUV is online if telemetry data is actively changing
  */
 export async function GET() {
-  let isMediaMTXAccessible = false;
   let isTelemetryChanging = false;
-  let mediaResponseTime = 0;
   let telemetryData: any = null;
 
   try {
-    // 1. Check MediaMTX player accessibility
-    const mediaStartTime = Date.now();
-    try {
-      const mediaResponse = await fetch(MEDIAMTX_PLAYER_URL, {
-        method: 'HEAD',
-        signal: AbortSignal.timeout(5000),
-      });
-      mediaResponseTime = Date.now() - mediaStartTime;
-      isMediaMTXAccessible = mediaResponse.ok;
-    } catch (error) {
-      isMediaMTXAccessible = false;
-      mediaResponseTime = Date.now() - mediaStartTime;
-    }
-
-    // 2. Fetch current telemetry data
+    // Fetch current telemetry data from Raspberry Pi
     try {
       const telemetryResponse = await fetch(RASPI_TELEMETRY_URL, {
         method: 'GET',
@@ -89,7 +65,7 @@ export async function GET() {
       if (telemetryResponse.ok) {
         telemetryData = await telemetryResponse.json();
 
-        // Validate required fields
+        // Validate required fields - only use: attitude, compass, battery, health
         if (
           telemetryData?.attitude &&
           telemetryData?.compass &&
@@ -110,14 +86,18 @@ export async function GET() {
           // Save new telemetry to database
           await prisma.telemetry.create({
             data: {
+              // Attitude
               rollDeg: telemetryData.attitude.roll_deg,
               pitchDeg: telemetryData.attitude.pitch_deg,
               yawDeg: telemetryData.attitude.yaw_deg,
+              // Compass
               headingDeg: telemetryData.compass.heading_deg,
+              // Battery
               voltageV: telemetryData.battery.voltage_v,
               currentA: telemetryData.battery.current_a,
               remainingPercent: telemetryData.battery.remaining_percent,
               consumedMah: telemetryData.battery.consumed_mAh,
+              // Health
               gyroCal: telemetryData.health.gyro_cal,
               accelCal: telemetryData.health.accel_cal,
               magCal: telemetryData.health.mag_cal,
@@ -130,18 +110,13 @@ export async function GET() {
       isTelemetryChanging = false;
     }
 
-    // 3. Determine overall online status
-    // AUV is online ONLY if BOTH conditions are met:
-    // - MediaMTX player is accessible
-    // - Telemetry data is changing
-    const isOnline = isMediaMTXAccessible && isTelemetryChanging;
+    // AUV is online ONLY if telemetry data is changing
+    const isOnline = isTelemetryChanging;
 
-    // 4. Calculate connection strength (based on MediaMTX response time)
-    const connectionStrength = isOnline
-      ? calculateConnectionStrength(mediaResponseTime)
-      : 'Disconnected';
+    // Connection strength based on whether data is changing
+    const connectionStrength = isOnline ? 'Strong' : 'Disconnected';
 
-    // 5. Update AUV status
+    // Update AUV status
     try {
       const latestStatus = await prisma.aUVStatus.findFirst({
         orderBy: { timestamp: 'desc' },
@@ -180,9 +155,7 @@ export async function GET() {
           isOnline,
           connectionStrength,
           uptimeSeconds: uptime,
-          mediaPlayerAccessible: isMediaMTXAccessible,
           telemetryDataChanging: isTelemetryChanging,
-          mediaResponseTimeMs: mediaResponseTime,
           timestamp: new Date().toISOString(),
         },
       });
@@ -194,9 +167,7 @@ export async function GET() {
         data: {
           isOnline,
           connectionStrength,
-          mediaPlayerAccessible: isMediaMTXAccessible,
           telemetryDataChanging: isTelemetryChanging,
-          mediaResponseTimeMs: mediaResponseTime,
           timestamp: new Date().toISOString(),
         },
         warning: 'Failed to save to database',
