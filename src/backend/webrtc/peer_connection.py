@@ -1,6 +1,3 @@
-"""
-WebRTC Peer Connection handling
-"""
 import asyncio
 import logging
 from typing import Dict
@@ -26,14 +23,6 @@ bitrate_tasks: Dict[str, asyncio.Task] = {}
 
 
 async def handle_offer(websocket, client_id: str, message: dict):
-    """
-    Handle WebRTC offer from client
-
-    Args:
-        websocket: WebSocket connection
-        client_id: Client identifier
-        message: Offer message containing SDP
-    """
     # Get preferences from offer
     offer_sdp = message["sdp"]
     pref_codec = (message.get("codec") or PREFER_CODEC).lower()
@@ -102,12 +91,6 @@ async def handle_offer(websocket, client_id: str, message: dict):
 
 
 async def cleanup_pc(client_id: str):
-    """
-    Cleanup peer connection and associated resources
-
-    Args:
-        client_id: Client identifier
-    """
     # Stop bitrate task
     task = bitrate_tasks.pop(client_id, None)
     if task:
@@ -135,18 +118,16 @@ async def cleanup_pc(client_id: str):
 
 
 def get_peer_connections() -> Dict[str, RTCPeerConnection]:
-    """Get active peer connections"""
     return peer_connections
 
 
 from typing import Optional
 
 def get_detection_track(client_id: str) -> Optional[RtspDetectionTrack]:
-    """Get detection track for a client"""
     return detection_tracks.get(client_id)
 
 
 async def cleanup_all():
-    """Cleanup all peer connections"""
+    pass
     for cid in list(peer_connections.keys()):
         await cleanup_pc(cid)

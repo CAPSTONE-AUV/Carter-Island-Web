@@ -9,15 +9,6 @@ logger = logging.getLogger("carter-backend")
 
 
 def make_rtsp_player(transport: str) -> MediaPlayer:
-    """
-    Create RTSP media player with optimized settings
-
-    Args:
-        transport: "tcp" or "udp"
-
-    Returns:
-        MediaPlayer instance
-    """
     opts = {
         "rtsp_transport": transport,
         "fflags": "nobuffer",

@@ -1,6 +1,3 @@
-"""
-Bitrate control utilities for WebRTC
-"""
 import asyncio
 import logging
 from typing import Optional, Callable
@@ -10,7 +7,6 @@ logger = logging.getLogger("carter-backend")
 
 
 def _insert_bitrate_and_xgoogle(sdp: str, kbps: int, fps: int) -> str:
-    """Insert bitrate parameters into SDP"""
     lines = sdp.splitlines()
     out = []
     in_video = False
@@ -46,7 +42,6 @@ def _insert_bitrate_and_xgoogle(sdp: str, kbps: int, fps: int) -> str:
 
 
 def _prefer_codec(sdp: str, codec: str = "H264") -> str:
-    """Prefer a specific codec in SDP"""
     codec = codec.upper()
     lines = sdp.splitlines()
     try:
@@ -73,7 +68,6 @@ def _prefer_codec(sdp: str, codec: str = "H264") -> str:
 
 
 def _strip_twcc_and_remb(sdp: str) -> str:
-    """Strip TWCC and REMB from SDP"""
     lines = sdp.splitlines()
     out = []
     for l in lines:
@@ -90,17 +84,7 @@ async def set_sender_bitrate(
     max_bitrate_bps: int,
     max_fps: int = 30
 ) -> Optional[Callable[[str], str]]:
-    """
-    Set sender bitrate parameters
-
-    Args:
-        sender: RTC sender
-        max_bitrate_bps: Maximum bitrate in bps
-        max_fps: Maximum FPS
-
-    Returns:
-        SDP munger function if needed, None otherwise
-    """
+    
     try:
         get_params = getattr(sender, "getParameters", None)
         set_params = getattr(sender, "setParameters", None)
@@ -127,16 +111,6 @@ async def periodic_reapply_bitrate(
     fps: int,
     peer_connections: dict
 ):
-    """
-    Periodically reapply bitrate settings
-
-    Args:
-        client_id: Client identifier
-        sender: RTC sender
-        bps: Bitrate in bps
-        fps: FPS
-        peer_connections: Dict of active peer connections
-    """
     try:
         while client_id in peer_connections:
             await set_sender_bitrate(sender, bps, fps)
@@ -154,19 +128,6 @@ def tune_answer_sdp(
     prefer: str,
     disable_twcc: bool
 ) -> str:
-    """
-    Tune answer SDP with codec preference and bitrate settings
-
-    Args:
-        raw_sdp: Original SDP
-        kbps: Bitrate in kbps
-        fps: FPS
-        prefer: Preferred codec ("h264" or "vp8")
-        disable_twcc: Whether to disable TWCC and REMB
-
-    Returns:
-        Tuned SDP string
-    """
     sdp = raw_sdp
 
     # Force codec

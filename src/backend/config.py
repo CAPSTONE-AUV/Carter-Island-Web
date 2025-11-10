@@ -1,6 +1,3 @@
-"""
-Configuration settings for Carter Island Backend
-"""
 import os
 import uuid
 
@@ -33,11 +30,8 @@ MIN_DETECTIONS_TO_SAVE = int(os.getenv("MIN_DETECTIONS_TO_SAVE", "1"))
 # ==========================
 # Recording Settings
 # ==========================
-# Use system temp directory instead of local recordings folder
 import tempfile
 RECORDINGS_DIR = tempfile.gettempdir()
-# Note: Video format is WebM (VP8/VP9) for browser compatibility
-# FPS is dynamically set based on actual stream FPS to avoid speed issues
 
 # ==========================
 # Model Settings

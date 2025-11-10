@@ -23,10 +23,6 @@ active_recordings: Dict[str, dict] = {}
 
 
 def initialize_recordings_dir():
-    """
-    Deprecated: Recordings directory initialization removed.
-    Using system temp directory instead to avoid local storage.
-    """
     logger.info(f"Recordings will be stored in system temp directory: {RECORDINGS_DIR}")
 
 
@@ -41,7 +37,7 @@ def create_video_writer(recording_id: str) -> Optional[cv2.VideoWriter]:
         writer = cv2.VideoWriter(
             filepath,
             fourcc,
-            RECORDING_FPS,
+            10.0,
             (RESIZE_WIDTH, RESIZE_HEIGHT)
         )
 
@@ -58,16 +54,6 @@ def create_video_writer(recording_id: str) -> Optional[cv2.VideoWriter]:
 
 
 async def start_recording(client_id: str, detection_track) -> Optional[str]:
-    """
-    Start recording for a client
-
-    Args:
-        client_id: Client identifier
-        detection_track: RtspDetectionTrack instance
-
-    Returns:
-        recording_id if successful, None otherwise
-    """
     if client_id in active_recordings:
         logger.warning(f"Client {client_id} is already recording")
         return None
@@ -88,10 +74,9 @@ async def start_recording(client_id: str, detection_track) -> Optional[str]:
         logger.info(f"Recording at {actual_fps:.1f} FPS (full stream rate)")
 
         # Create video writer with WebM format (VP8 codec) for browser compatibility
-        # WebM is natively supported by all modern browsers
         fourcc_options = [
-            cv2.VideoWriter.fourcc(*'VP80'),  # VP8 codec for WebM
-            cv2.VideoWriter.fourcc(*'VP90'),  # VP9 codec (fallback)
+            cv2.VideoWriter.fourcc(*'VP80'),
+            cv2.VideoWriter.fourcc(*'VP90'),
         ]
 
         writer = None
@@ -99,7 +84,7 @@ async def start_recording(client_id: str, detection_track) -> Optional[str]:
             writer = cv2.VideoWriter(
                 filepath,
                 fourcc,
-                actual_fps,  # Use actual stream FPS (10 FPS)
+                actual_fps,
                 (RESIZE_WIDTH, RESIZE_HEIGHT)
             )
             if writer.isOpened():
@@ -112,10 +97,8 @@ async def start_recording(client_id: str, detection_track) -> Optional[str]:
             logger.error(f"Failed to open video writer for {filepath}")
             return None
 
-        # Start recording on detection track
         detection_track.start_recording(writer)
 
-        # Store recording info (use Jakarta timezone)
         active_recordings[client_id] = {
             "recording_id": recording_id,
             "filename": filename,
@@ -134,15 +117,6 @@ async def start_recording(client_id: str, detection_track) -> Optional[str]:
 
 
 async def stop_recording(client_id: str) -> Optional[dict]:
-    """
-    Stop recording for a client and save to database
-
-    Args:
-        client_id: Client identifier
-
-    Returns:
-        Recording info dict if successful, None otherwise
-    """
     if client_id not in active_recordings:
         logger.warning(f"Client {client_id} is not recording")
         return None
@@ -152,8 +126,6 @@ async def stop_recording(client_id: str) -> Optional[dict]:
         recording_id = recording_info["recording_id"]
         filepath = recording_info["filepath"]
 
-        # Note: Writer is released by detection_track.stop_recording()
-        # Don't release here to avoid double-release
 
         # Get file info (use Jakarta timezone)
         file_size = os.path.getsize(filepath)
@@ -206,17 +178,14 @@ async def stop_recording(client_id: str) -> Optional[dict]:
 
 
 def is_recording(client_id: str) -> bool:
-    """Check if a client is currently recording"""
     return client_id in active_recordings
 
 
 def get_recording_info(client_id: str) -> Optional[dict]:
-    """Get recording info for a client"""
     return active_recordings.get(client_id)
 
 
 def cleanup_all_recordings():
-    """Stop and cleanup all active recordings"""
     for client_id in list(active_recordings.keys()):
         recording_info = active_recordings.pop(client_id)
         try:

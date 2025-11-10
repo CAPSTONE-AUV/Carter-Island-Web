@@ -1,7 +1,3 @@
-"""
-Carter Island Backend - Main Entry Point
-GPU-Optimized Real-time Fish Detection with YOLO
-"""
 import logging
 import torch
 from contextlib import asynccontextmanager
@@ -34,7 +30,6 @@ inference_executor = ThreadPoolExecutor(max_workers=2)
 # ==========================
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Application lifespan manager for startup and shutdown"""
     logger.info("=" * 60)
     logger.info("Starting Carter Island Backend...")
     logger.info("=" * 60)
@@ -42,8 +37,6 @@ async def lifespan(app: FastAPI):
     # Load YOLO model
     load_custom_model()
     logger.info(f"Device: {get_device_info()}")
-
-    # Recordings directory initialization removed - using system temp directory
 
     # Initialize HTTP client for database operations
     if SAVE_DETECTIONS_ENABLED:

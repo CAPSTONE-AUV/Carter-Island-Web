@@ -1,6 +1,3 @@
-"""
-Video detection track with YOLO inference
-"""
 import cv2
 import time
 import asyncio
@@ -37,7 +34,6 @@ current_infer_fps = 0.0
 
 
 class RtspDetectionTrack(VideoStreamTrack):
-    """Video stream track with YOLO detection and overlay"""
 
     def __init__(self, video_source_track):
         super().__init__()
@@ -63,7 +59,6 @@ class RtspDetectionTrack(VideoStreamTrack):
         self.stop_writer_thread = False
 
     async def recv(self) -> VideoFrame:
-        """Receive and process a video frame"""
         global frame_count, last_fps_time, current_fps
         global inference_count, last_infer_time, current_infer_fps
 
@@ -127,15 +122,11 @@ class RtspDetectionTrack(VideoStreamTrack):
         cv2.putText(img, f"Device: {device}", (10, 110),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 0, 255), 2)
 
-        # Add frame to queue for background video writing (non-blocking)
-        # Background thread handles encoding to prevent blocking main pipeline
         if self.recording and self.frame_queue is not None:
             try:
-                # Use put_nowait to avoid blocking
-                # img.copy() is necessary for thread safety
                 self.frame_queue.put_nowait(img.copy())
             except queue.Full:
-                pass  # Skip frame if queue is full to maintain stream FPS
+                pass
 
         img = img.astype(np.uint8)
         out = VideoFrame.from_ndarray(img, format="bgr24")
@@ -144,18 +135,17 @@ class RtspDetectionTrack(VideoStreamTrack):
         return out
 
     def _video_writer_thread(self):
-        """Background thread for writing frames to video file"""
         logger.info("Video writer thread started")
         frames_written = 0
 
         while not self.stop_writer_thread:
             try:
-                # Wait for frame with timeout to allow thread to check stop flag
-                frame = self.frame_queue.get(timeout=0.5)
+                if self.frame_queue is not None:
+                    frame = self.frame_queue.get(timeout=0.5)
 
-                if self.video_writer is not None:
-                    self.video_writer.write(frame)
-                    frames_written += 1
+                    if self.video_writer is not None:
+                        self.video_writer.write(frame)
+                        frames_written += 1
 
             except queue.Empty:
                 continue
@@ -165,7 +155,6 @@ class RtspDetectionTrack(VideoStreamTrack):
         logger.info(f"Video writer thread stopped. Frames written: {frames_written}")
 
     def start_recording(self, video_writer: cv2.VideoWriter):
-        """Start recording frames to video file using background thread"""
         self.recording = True
         self.video_writer = video_writer
         self.stop_writer_thread = False
@@ -180,7 +169,6 @@ class RtspDetectionTrack(VideoStreamTrack):
         logger.info(f"Started recording with background thread at full FPS (non-blocking)")
 
     def stop_recording(self):
-        """Stop recording frames and cleanup background thread"""
         self.recording = False
 
         # Stop the writer thread
