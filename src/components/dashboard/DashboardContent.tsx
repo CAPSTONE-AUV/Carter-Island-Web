@@ -301,7 +301,7 @@ export default function DashboardContent({
                           : 'bg-red-200 text-red-800'
                       }`}
                     >
-                      {telemetry ? (telemetry.gyroCal ? 'CAL' : 'UNCAL') : '--'}
+                      {telemetry ? (telemetry.gyroCal ? 'OK' : 'BAD') : '--'}
                     </span>
                   </div>
                   <div className="flex justify-between items-center">
@@ -313,11 +313,7 @@ export default function DashboardContent({
                           : 'bg-red-200 text-red-800'
                       }`}
                     >
-                      {telemetry
-                        ? telemetry.accelCal
-                          ? 'CAL'
-                          : 'UNCAL'
-                        : '--'}
+                      {telemetry ? (telemetry.accelCal ? 'OK' : 'BAD') : '--'}
                     </span>
                   </div>
                   <div className="flex justify-between items-center">
@@ -329,7 +325,7 @@ export default function DashboardContent({
                           : 'bg-red-200 text-red-800'
                       }`}
                     >
-                      {telemetry ? (telemetry.magCal ? 'CAL' : 'UNCAL') : '--'}
+                      {telemetry ? (telemetry.magCal ? 'OK' : 'BAD') : '--'}
                     </span>
                   </div>
                 </div>
