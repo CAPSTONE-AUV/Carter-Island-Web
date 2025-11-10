@@ -186,15 +186,26 @@ class RtspDetectionTrack(VideoStreamTrack):
         # Stop the writer thread
         self.stop_writer_thread = True
 
-        # Wait for thread to finish (max 5 seconds)
+        # Wait for queue to drain and thread to finish
         if self.writer_thread is not None:
-            self.writer_thread.join(timeout=5.0)
+            # Give thread time to process remaining frames in queue
+            logger.info("Waiting for video writer thread to finish...")
+            self.writer_thread.join(timeout=10.0)  # Increased timeout for queue drain
+
+            if self.writer_thread.is_alive():
+                logger.warning("Video writer thread did not finish in time")
+
             self.writer_thread = None
 
         # Release video writer
         if self.video_writer is not None:
-            self.video_writer.release()
-            self.video_writer = None
+            try:
+                self.video_writer.release()
+                logger.info("Video writer released successfully")
+            except Exception as e:
+                logger.error(f"Error releasing video writer: {e}")
+            finally:
+                self.video_writer = None
 
         # Clear queue
         self.frame_queue = None
