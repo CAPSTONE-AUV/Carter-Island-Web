@@ -14,7 +14,6 @@
     LogOut,
     ChevronLeft,
     BarChart3,
-    Settings,
     HelpCircle
     } from 'lucide-react'
     import { Button } from '@/components/ui/button'
@@ -94,14 +93,6 @@
         href: '/dashboard/users',
         icon: Users,
         description: 'User management & roles',
-        roles: ['ADMIN']
-        },
-        {
-        id: 'settings',
-        label: 'Settings',
-        href: '/dashboard/settings',
-        icon: Settings,
-        description: 'System configuration',
         roles: ['ADMIN']
         }
     ]

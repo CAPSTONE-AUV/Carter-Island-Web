@@ -331,46 +331,6 @@ export default function DashboardContent({
                 </div>
               </div>
             </div>
-
-            {/* Quick Actions */}
-            <div className="mt-6">
-              <h3 className="font-semibold text-gray-900 mb-3">
-                Quick Actions
-              </h3>
-              <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-                <Button className="h-16 flex-col gap-2" variant="default">
-                  <Activity size={20} />
-                  <span className="text-sm">Start Mission</span>
-                </Button>
-                <Button variant="outline" className="h-16 flex-col gap-2">
-                  <Camera size={20} />
-                  <span className="text-sm">Live Stream</span>
-                </Button>
-                <Button variant="outline" className="h-16 flex-col gap-2">
-                  <Clock size={20} />
-                  <span className="text-sm">View Logs</span>
-                </Button>
-                <Button variant="outline" className="h-16 flex-col gap-2">
-                  <MapPin size={20} />
-                  <span className="text-sm">Navigation</span>
-                </Button>
-                {userRole === 'ADMIN' && (
-                  <>
-                    <Button
-                      variant="outline"
-                      className="h-16 flex-col gap-2 border-red-200 text-red-600 hover:bg-red-50"
-                    >
-                      <TrendingUp size={20} />
-                      <span className="text-sm">System</span>
-                    </Button>
-                    <Button variant="outline" className="h-16 flex-col gap-2">
-                      <Activity size={20} />
-                      <span className="text-sm">Settings</span>
-                    </Button>
-                  </>
-                )}
-              </div>
-            </div>
           </CardContent>
         </Card>
 

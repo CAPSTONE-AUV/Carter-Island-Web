@@ -1,10 +1,12 @@
 'use client';
 
 import { useEffect, useRef, useState, useCallback } from 'react';
+import Header from '@/components/layout/Header'
 
 interface StreamComponentProps {
   /** contoh: ws://localhost:8000 */
   apiUrl?: string;
+  userFullName?: string; 
 }
 
 /** Sesuaikan dengan payload /api/performance backend-mu */
@@ -33,6 +35,7 @@ type SourceMode = 'server' | 'device';
 
 export default function StreamComponent({
   apiUrl = 'ws://localhost:8000',
+  userFullName,  
 }: StreamComponentProps) {
   const remoteVideoRef = useRef<HTMLVideoElement>(null); // hasil deteksi dari backend
   const localVideoRef = useRef<HTMLVideoElement>(null);  // hanya dipakai jika "device" dipilih
@@ -444,265 +447,265 @@ export default function StreamComponent({
   }
 
   return (
-    <div className="min-h-screen bg-slate-50 p-6">
-      <div className="max-w-7xl mx-auto space-y-6">
-        {/* Header */}
-        <div className="text-center">
-          <h1 className="text-3xl font-light text-slate-900 mb-2">Carter Island Detection System</h1>
-          <p className="text-slate-600">RTSP (server) → YOLO → WebRTC</p>
-        </div>
+    <div className="min-h-screen bg-slate-50">
+      {/* Header */}
+        <Header subtitle={'Live Stream Monitoring 🌊'} emoji={''} />
+        <div className="p-6">
+          <div className="max-w-7xl mx-auto space-y-6">
+            
 
-        {/* Status & Controls */}
-        <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-4">
-          <div className="flex flex-wrap items-center justify-between gap-4">
-            <div className="flex items-center gap-4">
-              <div className={`px-4 py-2 rounded-lg border text-sm font-medium flex items-center gap-2 ${getStatusColor(connectionStatus)}`}>
-                {getIndicator(connectionStatus)}
-                Status: {connectionStatus === 'error' ? 'websocket error' : connectionStatus}
+            {/* Status & Controls */}
+            <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-4">
+              <div className="flex flex-wrap items-center justify-between gap-4">
+                <div className="flex items-center gap-4">
+                  <div className={`px-4 py-2 rounded-lg border text-sm font-medium flex items-center gap-2 ${getStatusColor(connectionStatus)}`}>
+                    {getIndicator(connectionStatus)}
+                    Status: {connectionStatus === 'error' ? 'websocket error' : connectionStatus}
+                  </div>
+                  {performanceData && (
+                    <>
+                      {performanceData.device && (
+                        <div className="px-3 py-2 bg-slate-50 rounded-lg border border-slate-200">
+                          <span className="text-slate-700 text-sm font-medium">Device: {performanceData.device}</span>
+                        </div>
+                      )}
+                      {performanceData.cuda_available && (
+                        <div className="px-3 py-2 bg-emerald-50 rounded-lg border border-emerald-200">
+                          <span className="text-emerald-700 text-sm font-medium">CUDA Enabled</span>
+                        </div>
+                      )}
+                    </>
+                  )}
+                </div>
+
+                {/* Controls */}
+                <div className="flex flex-wrap items-center gap-3">
+                  {/* Source */}
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm text-slate-600">Source:</span>
+                    <div className="inline-flex rounded-lg border border-slate-200 overflow-hidden">
+                      <button onClick={() => setSource('server')}
+                              className={`px-3 py-1.5 text-sm ${source === 'server' ? 'bg-slate-900 text-white' : 'bg-white text-slate-700'}`}>
+                        Server RTSP
+                      </button>
+                      <button onClick={() => setSource('device')}
+                              className={`px-3 py-1.5 text-sm ${source === 'device' ? 'bg-slate-900 text-white' : 'bg-white text-slate-700'}`}>
+                        Device Cam
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Profile */}
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm text-slate-600">Profile:</span>
+                    <select
+                      value={profile}
+                      onChange={e => setProfile(e.target.value as Profile)}
+                      className="border border-slate-300 rounded-lg px-2 py-1 text-sm"
+                      title="Balanced=TCP (stabil), Ultra=UDP (latency rendah)"
+                    >
+                      <option value="balanced">Balanced (TCP)</option>
+                      <option value="ultra">Ultra-Low (UDP)</option>
+                    </select>
+                  </div>
+
+                  {/* Codec */}
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm text-slate-600">Codec:</span>
+                    <select
+                      value={codec}
+                      onChange={e => setCodec(e.target.value as Codec)}
+                      className="border border-slate-300 rounded-lg px-2 py-1 text-sm"
+                    >
+                      <option value="h264">H.264</option>
+                      <option value="vp8">VP8</option>
+                    </select>
+                  </div>
+
+                  {/* Bitrate */}
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm text-slate-600">Bitrate (kbps):</span>
+                    <input
+                      type="number"
+                      min={500}
+                      max={12000}
+                      step={100}
+                      value={bitrateKbps}
+                      onChange={e => setBitrateKbps(Number(e.target.value))}
+                      className="w-24 border border-slate-300 rounded-lg px-2 py-1 text-sm"
+                    />
+                  </div>
+                </div>
+
+                {/* Transport */}
+                <div className="flex gap-3">
+                  <button onClick={() => window.location.reload()} className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium text-sm">
+                    Refresh
+                  </button>
+                  <button
+                    onClick={startStream}
+                    disabled={isStreaming || connectionStatus !== 'connected'}
+                    className="px-6 py-2 bg-slate-900 hover:bg-slate-800 disabled:bg-slate-400 text-white rounded-lg font-medium text-sm"
+                  >
+                    {isStreaming ? 'Streaming...' : 'Start Stream'}
+                  </button>
+                  <button
+                    onClick={stopStream}
+                    disabled={!isStreaming}
+                    className="px-6 py-2 bg-red-600 hover:bg-red-700 disabled:bg-slate-400 text-white rounded-lg font-medium text-sm"
+                  >
+                    Stop Stream
+                  </button>
+
+                  {/* Recording Controls */}
+                  {isStreaming && (
+                    <>
+                      {!isRecording ? (
+                        <button
+                          onClick={startRecording}
+                          className="px-6 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg font-medium text-sm flex items-center gap-2"
+                        >
+                          <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+                            <circle cx="10" cy="10" r="6" />
+                          </svg>
+                          Record
+                        </button>
+                      ) : (
+                        <button
+                          onClick={stopRecording}
+                          className="px-6 py-2 bg-red-800 hover:bg-red-900 text-white rounded-lg font-medium text-sm flex items-center gap-2 animate-pulse"
+                        >
+                          <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+                            <rect x="6" y="6" width="8" height="8" />
+                          </svg>
+                          Stop Recording
+                        </button>
+                      )}
+                    </>
+                  )}
+                </div>
               </div>
-              {performanceData && (
-                <>
-                  {performanceData.device && (
-                    <div className="px-3 py-2 bg-slate-50 rounded-lg border border-slate-200">
-                      <span className="text-slate-700 text-sm font-medium">Device: {performanceData.device}</span>
-                    </div>
-                  )}
-                  {performanceData.cuda_available && (
-                    <div className="px-3 py-2 bg-emerald-50 rounded-lg border border-emerald-200">
-                      <span className="text-emerald-700 text-sm font-medium">CUDA Enabled</span>
-                    </div>
-                  )}
-                </>
-              )}
             </div>
 
-            {/* Controls */}
-            <div className="flex flex-wrap items-center gap-3">
-              {/* Source */}
-              <div className="flex items-center gap-2">
-                <span className="text-sm text-slate-600">Source:</span>
-                <div className="inline-flex rounded-lg border border-slate-200 overflow-hidden">
-                  <button onClick={() => setSource('server')}
-                          className={`px-3 py-1.5 text-sm ${source === 'server' ? 'bg-slate-900 text-white' : 'bg-white text-slate-700'}`}>
-                    Server RTSP
-                  </button>
-                  <button onClick={() => setSource('device')}
-                          className={`px-3 py-1.5 text-sm ${source === 'device' ? 'bg-slate-900 text-white' : 'bg-white text-slate-700'}`}>
-                    Device Cam
-                  </button>
+            {/* Video Grid */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              {/* Left: Preview lokal via IFRAME (server RTSP) atau Device preview */}
+              <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+                <div className="border-b border-slate-200 px-4 py-3">
+                  <h3 className="text-md font-medium text-slate-900">
+                    {source === 'server' ? 'Preview (MediaMTX)' : 'Input Preview (Device)'}
+                  </h3>
+                </div>
+                <div className="p-4">
+                  <div className="relative bg-slate-900 rounded-lg overflow-hidden" style={{ aspectRatio: '16/9' }}>
+                    {source === 'server' ? (
+                      <iframe
+                        src={IFRAME_PREVIEW_URL}
+                        className="w-full h-full"
+                        allow="autoplay; encrypted-media; picture-in-picture"
+                        referrerPolicy="no-referrer"
+                        allowFullScreen
+                      />
+                    ) : (
+                      <video
+                        ref={localVideoRef}
+                        autoPlay
+                        muted
+                        playsInline
+                        className="w-full h-full object-cover"
+                      />
+                    )}
+                    {!isStreaming && source === 'device' && (
+                      <div className="absolute inset-0 flex items-center justify-center">
+                        <div className="text-center text-slate-400">
+                          <div className="text-2xl mb-2">Device</div>
+                          <p className="text-sm">Not Active</p>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                  {source === 'server' && (
+                    <p className="text-xs text-slate-500 mt-2">Preview dari: {IFRAME_PREVIEW_URL}</p>
+                  )}
                 </div>
               </div>
 
-              {/* Profile */}
-              <div className="flex items-center gap-2">
-                <span className="text-sm text-slate-600">Profile:</span>
-                <select
-                  value={profile}
-                  onChange={e => setProfile(e.target.value as Profile)}
-                  className="border border-slate-300 rounded-lg px-2 py-1 text-sm"
-                  title="Balanced=TCP (stabil), Ultra=UDP (latency rendah)"
-                >
-                  <option value="balanced">Balanced (TCP)</option>
-                  <option value="ultra">Ultra-Low (UDP)</option>
-                </select>
-              </div>
-
-              {/* Codec */}
-              <div className="flex items-center gap-2">
-                <span className="text-sm text-slate-600">Codec:</span>
-                <select
-                  value={codec}
-                  onChange={e => setCodec(e.target.value as Codec)}
-                  className="border border-slate-300 rounded-lg px-2 py-1 text-sm"
-                >
-                  <option value="h264">H.264</option>
-                  <option value="vp8">VP8</option>
-                </select>
-              </div>
-
-              {/* Bitrate */}
-              <div className="flex items-center gap-2">
-                <span className="text-sm text-slate-600">Bitrate (kbps):</span>
-                <input
-                  type="number"
-                  min={500}
-                  max={12000}
-                  step={100}
-                  value={bitrateKbps}
-                  onChange={e => setBitrateKbps(Number(e.target.value))}
-                  className="w-24 border border-slate-300 rounded-lg px-2 py-1 text-sm"
-                />
-              </div>
-            </div>
-
-            {/* Transport */}
-            <div className="flex gap-3">
-              <button onClick={() => window.location.reload()} className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium text-sm">
-                Refresh
-              </button>
-              <button
-                onClick={startStream}
-                disabled={isStreaming || connectionStatus !== 'connected'}
-                className="px-6 py-2 bg-slate-900 hover:bg-slate-800 disabled:bg-slate-400 text-white rounded-lg font-medium text-sm"
-              >
-                {isStreaming ? 'Streaming...' : 'Start Stream'}
-              </button>
-              <button
-                onClick={stopStream}
-                disabled={!isStreaming}
-                className="px-6 py-2 bg-red-600 hover:bg-red-700 disabled:bg-slate-400 text-white rounded-lg font-medium text-sm"
-              >
-                Stop Stream
-              </button>
-
-              {/* Recording Controls */}
-              {isStreaming && (
-                <>
-                  {!isRecording ? (
-                    <button
-                      onClick={startRecording}
-                      className="px-6 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg font-medium text-sm flex items-center gap-2"
-                    >
-                      <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
-                        <circle cx="10" cy="10" r="6" />
-                      </svg>
-                      Record
-                    </button>
-                  ) : (
-                    <button
-                      onClick={stopRecording}
-                      className="px-6 py-2 bg-red-800 hover:bg-red-900 text-white rounded-lg font-medium text-sm flex items-center gap-2 animate-pulse"
-                    >
-                      <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
-                        <rect x="6" y="6" width="8" height="8" />
-                      </svg>
-                      Stop Recording
-                    </button>
-                  )}
-                </>
-              )}
-            </div>
-          </div>
-        </div>
-
-        {/* Video Grid */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {/* Left: Preview lokal via IFRAME (server RTSP) atau Device preview */}
-          <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
-            <div className="border-b border-slate-200 px-4 py-3">
-              <h3 className="text-md font-medium text-slate-900">
-                {source === 'server' ? 'Preview (MediaMTX)' : 'Input Preview (Device)'}
-              </h3>
-            </div>
-            <div className="p-4">
-              <div className="relative bg-slate-900 rounded-lg overflow-hidden" style={{ aspectRatio: '16/9' }}>
-                {source === 'server' ? (
-                  <iframe
-                    src={IFRAME_PREVIEW_URL}
-                    className="w-full h-full"
-                    allow="autoplay; encrypted-media; picture-in-picture"
-                    referrerPolicy="no-referrer"
-                    allowFullScreen
-                  />
-                ) : (
-                  <video
-                    ref={localVideoRef}
-                    autoPlay
-                    muted
-                    playsInline
-                    className="w-full h-full object-cover"
-                  />
-                )}
-                {!isStreaming && source === 'device' && (
-                  <div className="absolute inset-0 flex items-center justify-center">
-                    <div className="text-center text-slate-400">
-                      <div className="text-2xl mb-2">Device</div>
-                      <p className="text-sm">Not Active</p>
-                    </div>
+              {/* Right: Hasil deteksi dari backend */}
+              <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+                <div className="border-b border-slate-200 px-4 py-3">
+                  <h3 className="text-md font-medium text-slate-900">YOLO Detection (WebRTC)</h3>
+                </div>
+                <div className="p-4">
+                  <div className="relative bg-slate-900 rounded-lg overflow-hidden" style={{ aspectRatio: '16/9' }}>
+                    <video ref={remoteVideoRef} autoPlay playsInline className="w-full h-full object-cover" />
+                    {!isStreaming && (
+                      <div className="absolute inset-0 flex items-center justify-center">
+                        <div className="text-center text-slate-400">
+                          <div className="text-2xl mb-2">YOLO</div>
+                          <p className="text-sm">No Stream</p>
+                        </div>
+                      </div>
+                    )}
+                    {isStreaming && (
+                      <div className="absolute top-2 left-2 bg-red-500 text-white px-2 py-1 rounded text-xs font-medium">
+                        LIVE
+                      </div>
+                    )}
                   </div>
-                )}
+                </div>
               </div>
-              {source === 'server' && (
-                <p className="text-xs text-slate-500 mt-2">Preview dari: {IFRAME_PREVIEW_URL}</p>
-              )}
             </div>
-          </div>
 
-          {/* Right: Hasil deteksi dari backend */}
-          <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
-            <div className="border-b border-slate-200 px-4 py-3">
-              <h3 className="text-md font-medium text-slate-900">YOLO Detection (WebRTC)</h3>
-            </div>
-            <div className="p-4">
-              <div className="relative bg-slate-900 rounded-lg overflow-hidden" style={{ aspectRatio: '16/9' }}>
-                <video ref={remoteVideoRef} autoPlay playsInline className="w-full h-full object-cover" />
-                {!isStreaming && (
-                  <div className="absolute inset-0 flex items-center justify-center">
-                    <div className="text-center text-slate-400">
-                      <div className="text-2xl mb-2">YOLO</div>
-                      <p className="text-sm">No Stream</p>
-                    </div>
+            {/* Logs */}
+            <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+              <div className="border-b border-slate-200 px-4 py-3">
+                <h3 className="text-md font-medium text-slate-900">System Logs</h3>
+              </div>
+              <div className="p-4">
+                <div className="bg-slate-900 rounded-lg p-4 h-44 overflow-y-auto">
+                  <div className="space-y-1 text-sm font-mono">
+                    {logs.length ? logs.map((l, i) => <div key={i} className="text-emerald-400">{l}</div>) : <div className="text-slate-500">No logs</div>}
                   </div>
-                )}
-                {isStreaming && (
-                  <div className="absolute top-2 left-2 bg-red-500 text-white px-2 py-1 rounded text-xs font-medium">
-                    LIVE
+                </div>
+              </div>
+            </div>
+
+            {/* Performance */}
+            {performanceData && isStreaming && (
+              <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
+                <h3 className="text-lg font-medium text-slate-900 mb-4">Performance Monitor</h3>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                  <div className="text-center p-4 bg-slate-50 rounded-lg">
+                    <p className={`text-3xl font-light ${fpsClass(performanceData.fps ?? 0)}`}>{(performanceData.fps ?? 0).toFixed(1)}</p>
+                    <p className="text-sm text-slate-600 mt-1">Render FPS</p>
                   </div>
-                )}
+                  <div className="text-center p-4 bg-slate-50 rounded-lg">
+                    <p className={`text-3xl font-light ${fpsClass(performanceData.inference_fps ?? 0)}`}>{(performanceData.inference_fps ?? 0).toFixed(1)}</p>
+                    <p className="text-sm text-slate-600 mt-1">Inference FPS</p>
+                  </div>
+                  <div className="text-center p-4 bg-slate-50 rounded-lg">
+                    <p className="text-3xl font-light text-slate-700">{performanceData.active_ws ?? 0}</p>
+                    <p className="text-sm text-slate-600 mt-1">WS Connections</p>
+                  </div>
+                  <div className="text-center p-4 bg-slate-50 rounded-lg">
+                    <p className="text-3xl font-light text-slate-700">{performanceData.model_loaded ? 'Active' : 'Inactive'}</p>
+                    <p className="text-sm text-slate-600 mt-1">Model Status</p>
+                  </div>
+                </div>
               </div>
+            )}
+
+            {/* Notes */}
+            <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
+              <h3 className="text-lg font-medium text-slate-900 mb-3">Catatan</h3>
+              <ul className="list-disc list-inside text-sm text-slate-600 space-y-2">
+                <li>Panel kiri (Server RTSP) hanya **preview** via IFRAME. Input deteksi tetap di-pull dari RTSP oleh backend (latency rendah, stabil).</li>
+                <li>Kontrol <b>Codec / Profile / Bitrate / FPS</b> dikirim via signaling. Backend boleh mengabaikan bila belum diimplementasikan.</li>
+                <li>Jika ingin benar-benar enforce bitrate/codec dari sisi server, perlu dukungan di backend (mis. setSenderParameters/SDP munging).</li>
+              </ul>
             </div>
           </div>
         </div>
-
-        {/* Logs */}
-        <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
-          <div className="border-b border-slate-200 px-4 py-3">
-            <h3 className="text-md font-medium text-slate-900">System Logs</h3>
-          </div>
-          <div className="p-4">
-            <div className="bg-slate-900 rounded-lg p-4 h-44 overflow-y-auto">
-              <div className="space-y-1 text-sm font-mono">
-                {logs.length ? logs.map((l, i) => <div key={i} className="text-emerald-400">{l}</div>) : <div className="text-slate-500">No logs</div>}
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* Performance */}
-        {performanceData && isStreaming && (
-          <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
-            <h3 className="text-lg font-medium text-slate-900 mb-4">Performance Monitor</h3>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-              <div className="text-center p-4 bg-slate-50 rounded-lg">
-                <p className={`text-3xl font-light ${fpsClass(performanceData.fps ?? 0)}`}>{(performanceData.fps ?? 0).toFixed(1)}</p>
-                <p className="text-sm text-slate-600 mt-1">Render FPS</p>
-              </div>
-              <div className="text-center p-4 bg-slate-50 rounded-lg">
-                <p className={`text-3xl font-light ${fpsClass(performanceData.inference_fps ?? 0)}`}>{(performanceData.inference_fps ?? 0).toFixed(1)}</p>
-                <p className="text-sm text-slate-600 mt-1">Inference FPS</p>
-              </div>
-              <div className="text-center p-4 bg-slate-50 rounded-lg">
-                <p className="text-3xl font-light text-slate-700">{performanceData.active_ws ?? 0}</p>
-                <p className="text-sm text-slate-600 mt-1">WS Connections</p>
-              </div>
-              <div className="text-center p-4 bg-slate-50 rounded-lg">
-                <p className="text-3xl font-light text-slate-700">{performanceData.model_loaded ? 'Active' : 'Inactive'}</p>
-                <p className="text-sm text-slate-600 mt-1">Model Status</p>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Notes */}
-        <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
-          <h3 className="text-lg font-medium text-slate-900 mb-3">Catatan</h3>
-          <ul className="list-disc list-inside text-sm text-slate-600 space-y-2">
-            <li>Panel kiri (Server RTSP) hanya **preview** via IFRAME. Input deteksi tetap di-pull dari RTSP oleh backend (latency rendah, stabil).</li>
-            <li>Kontrol <b>Codec / Profile / Bitrate / FPS</b> dikirim via signaling. Backend boleh mengabaikan bila belum diimplementasikan.</li>
-            <li>Jika ingin benar-benar enforce bitrate/codec dari sisi server, perlu dukungan di backend (mis. setSenderParameters/SDP munging).</li>
-          </ul>
-        </div>
-      </div>
     </div>
   );
 }
