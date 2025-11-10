@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import prisma from '@/lib/prisma';
+import { prisma } from '@/lib/prisma';
 
 const RASPI_TELEMETRY_URL = 'http://192.168.2.2:14552/telemetry';
 

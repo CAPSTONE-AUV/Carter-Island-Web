@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import prisma from '@/lib/prisma';
+import { prisma } from '@/lib/prisma';
 
 // POST /api/auv-status - Save AUV status data
 export async function POST(request: NextRequest) {
