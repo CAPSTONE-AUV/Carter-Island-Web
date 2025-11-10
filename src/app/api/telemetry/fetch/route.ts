@@ -25,20 +25,28 @@ export async function GET() {
     const data = await response.json();
 
     // Validate required fields
-    if (!data.compass || !data.battery || !data.health) {
+    if (!data.attitude || !data.compass || !data.battery || !data.health) {
       throw new Error('Invalid telemetry data from Raspberry Pi');
     }
 
     // Save to database
     const telemetry = await prisma.telemetry.create({
       data: {
-        yawDeg: data.compass.yaw_deg,
+        // Attitude
+        rollDeg: data.attitude.roll_deg,
+        pitchDeg: data.attitude.pitch_deg,
+        yawDeg: data.attitude.yaw_deg,
+        // Compass
+        headingDeg: data.compass.heading_deg,
+        // Battery
         voltageV: data.battery.voltage_v,
         currentA: data.battery.current_a,
         remainingPercent: data.battery.remaining_percent,
-        gyroOk: data.health.gyro_ok,
-        accelOk: data.health.accel_ok,
-        magOk: data.health.mag_ok,
+        consumedMah: data.battery.consumed_mAh,
+        // Health
+        gyroCal: data.health.gyro_cal,
+        accelCal: data.health.accel_cal,
+        magCal: data.health.mag_cal,
       },
     });
 
