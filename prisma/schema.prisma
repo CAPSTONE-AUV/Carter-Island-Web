@@ -99,16 +99,21 @@ model Recording {
 // Model untuk menyimpan data telemetry dari AUV
 model Telemetry {
   id               String   @id @default(cuid())
+  // Attitude data
+  rollDeg          Float    @map("roll_deg") // Roll dalam derajat
+  pitchDeg         Float    @map("pitch_deg") // Pitch dalam derajat
+  yawDeg           Float    @map("yaw_deg") // Yaw dalam derajat
   // Compass data
-  yawDeg           Float    @map("yaw_deg") // Heading dalam derajat
+  headingDeg       Float    @map("heading_deg") // Heading dalam derajat
   // Battery data
   voltageV         Float    @map("voltage_v") // Voltage dalam Volt
-  currentA         Float    @map("current_a") // Current dalam Ampere
+  currentA         Float?   @map("current_a") // Current dalam Ampere (nullable)
   remainingPercent Float    @map("remaining_percent") // Battery remaining dalam persen
+  consumedMah      Float?   @map("consumed_mah") // Battery consumed dalam mAh (nullable)
   // Health status
-  gyroOk           Boolean  @map("gyro_ok") // Status gyroscope
-  accelOk          Boolean  @map("accel_ok") // Status accelerometer
-  magOk            Boolean  @map("mag_ok") // Status magnetometer
+  gyroCal          Boolean  @map("gyro_cal") // Status gyroscope calibration
+  accelCal         Boolean  @map("accel_cal") // Status accelerometer calibration
+  magCal           Boolean  @map("mag_cal") // Status magnetometer calibration
   // Metadata
   timestamp        DateTime @default(now()) // Waktu data diterima
   createdAt        DateTime @default(now()) @map("created_at")
