@@ -149,6 +149,31 @@ export async function GET() {
         },
       });
 
+      // Periodic cleanup: Delete old data every 100th call to prevent DB bloat
+      // This runs approximately every 500 seconds (8.3 minutes) with 5s polling
+      const shouldCleanup = Math.random() < 0.01; // 1% chance = ~every 100 calls
+      if (shouldCleanup) {
+        try {
+          const sevenDaysAgo = new Date();
+          sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+
+          // Delete old telemetry and AUV status data (older than 7 days)
+          await Promise.all([
+            prisma.telemetry.deleteMany({
+              where: { timestamp: { lt: sevenDaysAgo } },
+            }),
+            prisma.aUVStatus.deleteMany({
+              where: { timestamp: { lt: sevenDaysAgo } },
+            }),
+          ]);
+
+          console.log('Database cleanup completed');
+        } catch (cleanupError) {
+          console.error('Cleanup error:', cleanupError);
+          // Don't fail the request if cleanup fails
+        }
+      }
+
       return NextResponse.json({
         success: true,
         data: {
